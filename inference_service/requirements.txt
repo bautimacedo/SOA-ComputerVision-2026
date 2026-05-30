@@ -4,6 +4,6 @@ torchvision
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 ultralytics==8.3.0
-pillow==11.0.0
+pillow
 python-multipart==0.0.12
 pydantic-settings==2.6.0
