@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     # App
     base_url: str = "http://localhost:8000"
 
+    # Inference service (corre en PC local vía Tailscale)
+    inference_service_url: str = "http://localhost:8001"
+
     class Config:
         env_file = ".env"
 

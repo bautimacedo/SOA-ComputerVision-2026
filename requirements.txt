@@ -8,7 +8,7 @@ python-multipart==0.0.12
 pillow==11.0.0
 pydantic[email]==2.9.2
 pydantic-settings==2.6.0
-ultralytics==8.3.0
+requests==2.32.3
 # Rodilla agrega:
 # insightface==0.7.3
 # onnxruntime==1.19.2

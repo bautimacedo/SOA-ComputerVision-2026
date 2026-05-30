@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from app.database import get_db
+from app.models.file import File
 from app.schemas.frame import FrameSearchResult
 from app.services.storage import get_frame_image
 from app.services.query import search_frames
@@ -34,9 +35,11 @@ def search(
 def get_frame(
     frame_id: UUID,
     thumbnail: bool = Query(default=False),
+    db: Session = Depends(get_db),
 ):
     """S3 — Devuelve la imagen asociada al frameId (original o thumbnail)."""
-    image_data, content_type = get_frame_image(str(frame_id), thumbnail)
-    if image_data is None:
+    file_record = db.query(File).filter(File.frame_id == frame_id).first()
+    if not file_record:
         raise HTTPException(status_code=404, detail="Frame not found")
+    image_data, content_type = get_frame_image(file_record.path, thumbnail)
     return StreamingResponse(image_data, media_type=content_type)

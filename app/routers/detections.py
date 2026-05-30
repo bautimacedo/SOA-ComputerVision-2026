@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.frame import Frame
 from app.models.detection import Detection
+from app.models.file import File as FileRecord
 from app.schemas.detection import DetectionResponse
 from app.services.storage import upload_frame, StorageError
 from app.services.yolo import run_inference, get_available_models
@@ -24,7 +25,12 @@ def run_detection(
     if image.content_type and not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="El archivo debe ser una imagen")
 
-    if model_id not in get_available_models():
+    try:
+        available = get_available_models()
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    if model_id not in available:
         raise HTTPException(status_code=400, detail=f"Modelo '{model_id}' no disponible")
 
     try:
@@ -42,11 +48,13 @@ def run_detection(
         detected_objects = run_inference(model_id, image_bytes)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
     # 2. Subir imagen a S3
     frame_id = uuid.uuid4()
     try:
-        upload_frame(str(frame_id), image_bytes, image.content_type or "image/jpeg")
+        s3_key = upload_frame(str(frame_id), image_bytes, image.content_type or "image/jpeg")
     except StorageError as e:
         raise HTTPException(status_code=503, detail=f"Error al guardar imagen: {e}")
 
@@ -54,15 +62,18 @@ def run_detection(
     try:
         frame = Frame(
             id=frame_id,
-            object_key=f"frames/{frame_id}.jpg",
             metadata_=meta,
-            model_id=model_id,
         )
         db.add(frame)
+        file = FileRecord(
+            frame_id=frame_id,
+            path=s3_key,
+        )
+        db.add(file)
         detection = Detection(
             frame_id=frame_id,
             model_id=model_id,
-            results={"objects": detected_objects},
+            detections={"objects": detected_objects},
         )
         db.add(detection)
         db.commit()

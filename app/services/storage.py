@@ -38,11 +38,10 @@ def upload_frame(frame_id: str, image_bytes: bytes, content_type: str = "image/j
     return key
 
 
-def get_frame_image(frame_id: str, thumbnail: bool = False):
+def get_frame_image(path: str, thumbnail: bool = False):
     """Descarga una imagen de S3. Devuelve (stream, content_type) o (None, None)."""
-    key = f"frames/{frame_id}.jpg"
     try:
-        response = get_s3().get_object(Bucket=settings.s3_bucket_name, Key=key)
+        response = get_s3().get_object(Bucket=settings.s3_bucket_name, Key=path)
         image_bytes = response["Body"].read()
     except ClientError as e:
         if e.response["Error"]["Code"] == "NoSuchKey":

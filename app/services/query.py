@@ -31,7 +31,7 @@ def search_frames(
 
     results = []
     for frame in frames:
-        detection_list = [d.results for d in frame.detections]
+        detection_list = [d.detections for d in frame.detections]
 
         if classes:
             detected_classes = {

@@ -1,39 +1,32 @@
-import io
-import os
-from PIL import Image, UnidentifiedImageError
-from ultralytics import YOLO
+import requests
 from app.config import settings
-
-_cache: dict[str, YOLO] = {}
 
 
 def get_available_models() -> list[str]:
-    if not os.path.isdir(settings.models_dir):
-        return []
-    return [f for f in os.listdir(settings.models_dir) if f.endswith(".pt")]
+    try:
+        response = requests.get(
+            f"{settings.inference_service_url}/models",
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.ConnectionError:
+        raise RuntimeError("Inference service unreachable")
 
 
 def run_inference(model_id: str, image_bytes: bytes) -> list[dict]:
-    if model_id not in _cache:
-        path = os.path.join(settings.models_dir, model_id)
-        _cache[model_id] = YOLO(path)
-
-    model = _cache[model_id]
-
     try:
-        img = Image.open(io.BytesIO(image_bytes))
-    except (UnidentifiedImageError, Exception):
-        raise ValueError("El archivo no es una imagen válida")
+        response = requests.post(
+            f"{settings.inference_service_url}/infer",
+            files={"image": ("image.jpg", image_bytes, "image/jpeg")},
+            data={"model_id": model_id},
+            timeout=60,
+        )
+    except requests.exceptions.ConnectionError:
+        raise RuntimeError("Inference service unreachable")
 
-    results = model(img, verbose=False)
+    if response.status_code == 400:
+        raise ValueError(response.json().get("detail", "Bad request"))
 
-    objects = []
-    for result in results:
-        for box in result.boxes:
-            objects.append({
-                "class": result.names[int(box.cls)],
-                "confidence": round(float(box.conf), 4),
-                "bbox": [round(v, 2) for v in box.xyxy[0].tolist()],
-            })
-
-    return objects
+    response.raise_for_status()
+    return response.json()["objects"]
