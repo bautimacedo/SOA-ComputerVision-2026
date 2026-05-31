@@ -88,7 +88,7 @@ sequenceDiagram
 
         F->>PC: POST /infer<br/>multipart: image bytes + model_id<br/>HTTP 100.x.x.x:8001<br/>timeout: 60s
 
-        Note over PC: Carga modelo .pt (o usa caché)<br/>Abre imagen con Pillow<br/>Ejecuta YOLO en GPU<br/>Extrae clases, confianzas, bboxes
+        Note over PC: Carga modelo .pt (o usa caché)<br/>Abre imagen con Pillow<br/>Ejecuta YOLO en GPU<br/>Extrae clases, confianzas y bboxes<br/>normalizados [0-1]
 
         PC-->>F: 200<br/>{"objects": [<br/>  {"class":"person","confidence":0.91,"bbox":[...]},<br/>  {"class":"zebra","confidence":0.87,"bbox":[...]}<br/>]}
 

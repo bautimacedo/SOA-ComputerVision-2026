@@ -169,8 +169,8 @@ curl -X POST https://soagmr.mooo.com/detections \
 #   "frameId": "550e8400-e29b-41d4-a716-446655440000",
 #   "modelId": "yolo11n.pt",
 #   "detections": [
-#     {"class": "person", "confidence": 0.91, "bbox": [34.0, 45.0, 216.0, 328.0]},
-#     {"class": "zebra",  "confidence": 0.87, "bbox": [0.0, 12.0, 480.0, 360.0]}
+#     {"class": "person", "confidence": 0.91, "bbox": [0.0531, 0.0937, 0.3375, 0.6833]},
+#     {"class": "zebra",  "confidence": 0.87, "bbox": [0.0, 0.0250, 0.7500, 0.7500]}
 #   ]
 # }
 ```

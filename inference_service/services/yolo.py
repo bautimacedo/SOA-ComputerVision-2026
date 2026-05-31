@@ -33,7 +33,7 @@ def run_inference(model_id: str, image_bytes: bytes) -> list[dict]:
             objects.append({
                 "class": result.names[int(box.cls)],
                 "confidence": round(float(box.conf), 4),
-                "bbox": [round(v, 2) for v in box.xyxy[0].tolist()],
+                "bbox": [round(v, 4) for v in box.xyxyn[0].tolist()],
             })
 
     return objects

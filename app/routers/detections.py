@@ -31,7 +31,7 @@ Recibe una imagen junto con metadatos geográficos y el modelo a utilizar.
 Los metadatos son flexibles: además de `lat` y `lon` se puede incluir cualquier campo adicional
 (nombre de cámara, piso, fecha, etc.) y quedará almacenado en la base de datos.
 
-El campo `bbox` en cada detección representa las coordenadas del bounding box en píxeles: `[x1, y1, x2, y2]`.
+El campo `bbox` en cada detección representa las coordenadas del bounding box en valores **relativos de 0 a 1** respecto al tamaño de la imagen: `[x1, y1, x2, y2]`. Son independientes de la resolución — el mismo objeto en una imagen de 640×480 y en una de 1920×1080 tiene el mismo bbox.
 """,
     response_description="frameId asignado, modelo usado y lista de objetos detectados.",
     responses={
