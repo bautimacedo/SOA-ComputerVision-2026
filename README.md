@@ -281,6 +281,14 @@ Flask es un microframework minimalista que fue diseñado en una época donde las
 - **Tipado:** al declarar los tipos de los parámetros y respuestas, el código es más claro.
 - **Rendimiento:** FastAPI usa ASGI (asíncrono) mientras Flask usa WSGI (sincrónico). Para operaciones que esperan respuestas de red (base de datos, S3, servicio de inferencia), la diferencia es significativa.
 
+FastAPI no es un servidor web por sí solo — necesita un servidor ASGI para correr. Usamos **Uvicorn**, que es el servidor ASGI de referencia para Python. Uvicorn es el que escucha en el puerto 8000, acepta las conexiones HTTP y las pasa a FastAPI para que las procese. En el `Dockerfile` se ve claramente:
+
+```
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+La relación es: **nginx** recibe la request en el puerto 80/443 → la pasa a **Uvicorn** en el puerto 8000 → Uvicorn se la entrega a **FastAPI** para ejecutar la lógica.
+
 ### Estructura de carpetas
 
 ```
