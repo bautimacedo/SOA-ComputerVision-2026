@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import and_, cast, Float
+from sqlalchemy import and_, cast, Float, exists
 
 from app.models.frame import Frame
+from app.models.detection import Detection
 from app.schemas.frame import FrameSearchResult
 from app.config import settings
 
@@ -13,9 +14,10 @@ def search_frames(
     lon_min: float,
     lon_max: float,
     classes: list[str],
-    extra_metadata_json: str | None,
+    extra_metadata: dict | None,
+    model_id: str | None,
 ) -> list[FrameSearchResult]:
-    frames = (
+    query = (
         db.query(Frame)
         .options(selectinload(Frame.detections))
         .filter(
@@ -26,8 +28,23 @@ def search_frames(
                 cast(Frame.metadata_["lon"].astext, Float) <= lon_max,
             )
         )
-        .all()
     )
+
+    if extra_metadata:
+        for key, value in extra_metadata.items():
+            query = query.filter(
+                Frame.metadata_[key].astext == str(value)
+            )
+
+    if model_id:
+        query = query.filter(
+            exists().where(
+                Detection.frame_id == Frame.id,
+                Detection.model_id == model_id,
+            )
+        )
+
+    frames = query.all()
 
     results = []
     for frame in frames:

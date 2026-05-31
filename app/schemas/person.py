@@ -4,6 +4,15 @@ from uuid import UUID
 
 
 class PersonCreate(BaseModel):
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "nombre": "Juan",
+            "apellido": "Pérez",
+            "email": "juan@mail.com",
+            "extra": {"legajo": "12345", "sector": "seguridad"}
+        }
+    })
+
     nombre: str
     apellido: str
     email: EmailStr
@@ -11,7 +20,19 @@ class PersonCreate(BaseModel):
 
 
 class PersonResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "personId": "550e8400-e29b-41d4-a716-446655440000",
+                "nombre": "Juan",
+                "apellido": "Pérez",
+                "email": "juan@mail.com",
+                "extra": {"legajo": "12345"}
+            }
+        }
+    )
 
     personId: UUID = Field(alias="id")
     nombre: str
@@ -21,10 +42,25 @@ class PersonResponse(BaseModel):
 
 
 class EmbeddingRequest(BaseModel):
-    images: list[str]   # base64 o URLs
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "images": ["<base64_imagen_1>", "<base64_imagen_2>"]
+        }
+    })
+
+    images: list[str]
 
 
 class EmbeddingResponse(BaseModel):
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "personId": "550e8400-e29b-41d4-a716-446655440000",
+            "processedImages": 3,
+            "validEmbeddings": 2,
+            "rejectedImages": 1
+        }
+    })
+
     personId: UUID
     processedImages: int
     validEmbeddings: int
@@ -32,11 +68,27 @@ class EmbeddingResponse(BaseModel):
 
 
 class RecognitionRequest(BaseModel):
-    image: str          # base64
-    threshold: float = 0.8
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "image": "<base64_imagen>",
+            "threshold": 0.8
+        }
+    })
+
+    image: str
+    threshold: float = Field(default=0.8, ge=0.0, le=1.0, description="Umbral mínimo de similitud. Rango: 0.0–1.0")
 
 
 class RecognitionResponse(BaseModel):
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "personId": "550e8400-e29b-41d4-a716-446655440000",
+            "nombre": "Juan",
+            "apellido": "Pérez",
+            "confidence": 0.87
+        }
+    })
+
     personId: UUID | None
     nombre: str | None = None
     apellido: str | None = None
