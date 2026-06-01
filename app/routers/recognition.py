@@ -1,37 +1,64 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 
+from app.database import get_db
 from app.schemas.person import RecognitionRequest, RecognitionResponse
+from app.services.insightface_service import insightface_service
 
 router = APIRouter(prefix="/face-recognition", tags=["S5.3 - Reconocimiento facial"])
 
 
-@router.post(
-    "",
-    response_model=RecognitionResponse,
-    summary="Identificar persona en una imagen",
-    description="""
-Recibe una imagen e intenta identificar a la persona comparando su rostro
-contra todos los embeddings almacenados en la base de datos.
+@router.post("", response_model=RecognitionResponse)
+def recognize_face(body: RecognitionRequest, db: Session = Depends(get_db)):
+    try:
+        embedding_vector = insightface_service.get_embedding_from_base64(body.image)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-**Proceso:**
-1. Se detecta el rostro en la imagen recibida.
-2. Se genera su embedding (vector de 512 dimensiones) con InsightFace.
-3. Se compara contra todos los embeddings en la BD usando similitud vectorial (pgvector).
-4. Si el mejor match supera el `threshold`, se retorna la persona identificada.
-5. Si ninguno supera el umbral, se retorna `personId: null`.
+    embedding_literal = "[" + ",".join(str(value) for value in embedding_vector) + "]"
 
-**Threshold:** valor entre 0 y 1 que define qué tan similar debe ser el rostro para considerarse
-un match válido. Un valor alto (0.9) es más estricto; uno bajo (0.6) es más permisivo.
-El valor por defecto es `0.8`.
+    result = db.execute(
+        text("""
+            SELECT
+                e.id AS embedding_id,
+                e.person_id,
+                p.nombre,
+                p.apellido,
+                p.email,
+                e.vector <=> CAST(:embedding AS vector(512)) AS distance
+            FROM embeddings e
+            JOIN persons p ON p.id = e.person_id
+            ORDER BY e.vector <=> CAST(:embedding AS vector(512))
+            LIMIT 1
+        """),
+        {
+            "embedding": embedding_literal
+        }
+    ).mappings().first()
 
-La imagen se envía en formato **base64**.
-""",
-    response_description="Persona identificada con su nivel de confianza, o `personId: null` si no se reconoció a nadie.",
-    responses={
-        400: {"description": "No se detectó ningún rostro en la imagen."},
-        422: {"description": "Request mal formado."},
-        501: {"description": "No implementado aún."},
-    },
-)
-def recognize_face(body: RecognitionRequest):
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    if result is None:
+        return RecognitionResponse(
+            personId=None,
+            nombre=None,
+            apellido=None,
+            confidence=0.0
+        )
+
+    distance = float(result["distance"])
+    confidence = 1.0 - distance
+
+    if confidence < body.threshold:
+        return RecognitionResponse(
+            personId=None,
+            nombre=None,
+            apellido=None,
+            confidence=confidence
+        )
+
+    return RecognitionResponse(
+        personId=result["person_id"],
+        nombre=result["nombre"],
+        apellido=result["apellido"],
+        confidence=confidence
+    )

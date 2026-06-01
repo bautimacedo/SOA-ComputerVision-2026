@@ -1,74 +1,85 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
 from uuid import UUID
 
+from app.database import get_db
+from app.models.person import Person
+from app.models.embedding import Embedding
 from app.schemas.person import PersonCreate, PersonResponse, EmbeddingRequest, EmbeddingResponse
+from app.services.insightface_service import insightface_service
 
 router = APIRouter(prefix="/persons", tags=["S5 - Personas y Embeddings"])
 
 
-@router.post(
-    "",
-    response_model=PersonResponse,
-    status_code=201,
-    summary="Registrar una nueva persona",
-    description="""
-Crea un nuevo registro de persona en el sistema.
+@router.post("", response_model=PersonResponse, status_code=201)
+def create_person(body: PersonCreate, db: Session = Depends(get_db)):
+    existing_person = db.query(Person).filter(Person.email == body.email).first()
 
-El campo `extra` es opcional y acepta cualquier estructura JSON adicional
-(legajo, sector, fecha de alta, etc.).
+    if existing_person:
+        raise HTTPException(status_code=409, detail="Ya existe una persona con ese email")
 
-El `email` debe ser único — no se pueden registrar dos personas con el mismo email.
-""",
-    response_description="Datos de la persona creada, incluyendo el `personId` asignado.",
-    responses={
-        422: {"description": "Falta un campo obligatorio o el email no tiene formato válido."},
-        501: {"description": "No implementado aún."},
-    },
-)
-def create_person(body: PersonCreate):
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    person = Person(
+        nombre=body.nombre,
+        apellido=body.apellido,
+        email=body.email,
+        extra=body.extra
+    )
+
+    db.add(person)
+    db.commit()
+    db.refresh(person)
+
+    return person
 
 
-@router.get(
-    "/{person_id}",
-    response_model=PersonResponse,
-    summary="Obtener datos de una persona",
-    description="Retorna la información de una persona registrada a partir de su `personId`.",
-    response_description="Datos completos de la persona.",
-    responses={
-        404: {"description": "No existe una persona con ese ID."},
-        422: {"description": "El `personId` no tiene formato UUID válido."},
-        501: {"description": "No implementado aún."},
-    },
-)
-def get_person(person_id: UUID):
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+@router.get("/{person_id}", response_model=PersonResponse)
+def get_person(person_id: UUID, db: Session = Depends(get_db)):
+    person = db.query(Person).filter(Person.id == person_id).first()
+
+    if person is None:
+        raise HTTPException(status_code=404, detail="Persona no encontrada")
+
+    return person
 
 
-@router.post(
-    "/{person_id}/embeddings",
-    response_model=EmbeddingResponse,
-    summary="Generar embeddings faciales",
-    description="""
-Asocia imágenes a una persona y genera sus representaciones faciales (embeddings) usando **InsightFace**.
+@router.post("/{person_id}/embeddings", response_model=EmbeddingResponse)
+def generate_embeddings(
+    person_id: UUID,
+    body: EmbeddingRequest,
+    db: Session = Depends(get_db)
+):
+    person = db.query(Person).filter(Person.id == person_id).first()
 
-Por cada imagen recibida:
-1. Se detecta si hay un rostro presente.
-2. Si hay rostro, se genera un vector de **512 dimensiones** que codifica sus características.
-3. El vector se almacena en la tabla `embeddings` vinculado a la persona.
-4. Si no se detecta rostro, la imagen es rechazada.
+    if person is None:
+        raise HTTPException(status_code=404, detail="Persona no encontrada")
 
-Una persona puede tener múltiples embeddings. Cuantos más embeddings tenga,
-mayor es la precisión del reconocimiento facial (S5.3).
+    processed_images = 0
+    valid_embeddings = 0
+    rejected_images = 0
 
-Las imágenes se envían en formato **base64**.
-""",
-    response_description="Resumen del procesamiento: cuántas imágenes se procesaron, cuántos embeddings fueron generados y cuántas imágenes fueron rechazadas.",
-    responses={
-        404: {"description": "No existe una persona con ese `personId`."},
-        422: {"description": "Request mal formado."},
-        501: {"description": "No implementado aún."},
-    },
-)
-def generate_embeddings(person_id: UUID, body: EmbeddingRequest):
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    for image_base64 in body.images:
+        processed_images += 1
+
+        try:
+            embedding_vector = insightface_service.get_embedding_from_base64(image_base64)
+
+            embedding = Embedding(
+                person_id=person.id,
+                vector=embedding_vector
+            )
+
+            db.add(embedding)
+            valid_embeddings += 1
+
+        except Exception as e:
+            print(f"Error procesando imagen: {e}")
+            rejected_images += 1
+
+    db.commit()
+
+    return EmbeddingResponse(
+        personId=person.id,
+        processedImages=processed_images,
+        validEmbeddings=valid_embeddings,
+        rejectedImages=rejected_images
+    )

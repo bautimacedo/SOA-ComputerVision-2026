@@ -5,3 +5,8 @@ __pycache__/
 .pytest_cache/
 models/*.pt
 inference_service/models/
+
+embedding_payload.json
+persona1_base64.txt
+persona1_real.jpg
+recognition_payload.json

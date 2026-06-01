@@ -22,9 +22,9 @@ En esta primera etapa no existe interfaz gráfica. Toda la interacción se reali
 | S2 — Ejecución de detección | `POST /detections` | ✅ Implementado |
 | S3 — Obtención de fotograma | `GET /frames/{id}` | ✅ Implementado |
 | S4 — Consulta y filtrado | `GET /frames/search` | ✅ Implementado |
-| S5.1 — Gestión de personas | `POST /persons`, `GET /persons/{id}` | 🔴 Pendiente |
-| S5.2 — Generación de embeddings | `POST /persons/{id}/embeddings` | 🔴 Pendiente |
-| S5.3 — Reconocimiento facial | `POST /face-recognition` | 🔴 Pendiente |
+| S5.1 — Gestión de personas | `POST /persons`, `GET /persons/{id}` | ✅ Implementado |
+| S5.2 — Generación de embeddings | `POST /persons/{id}/embeddings` | ✅ Implementado |
+| S5.3 — Reconocimiento facial | `POST /face-recognition` | ✅ Implementado |
 
 ### Fase 2 — Pendiente
 
@@ -232,13 +232,163 @@ curl "https://soagmr.mooo.com/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&
 > Los valores de `metadata` están URL-encoded en curl. `{"camara":"cam_01"}` → `%7B%22camara%22%3A%22cam_01%22%7D`.
 > Desde Postman o el Swagger en `/docs` se puede escribir el JSON directamente sin encodear.
 
-### S5.1 — Crear persona (pendiente de implementación)
+## S5.1 — Gestión de personas
 
+Esta parte permite registrar personas dentro del sistema para luego poder reconocerlas en imágenes nuevas.
 
-### S5.2 — Generar embeddings faciales (pendiente)
+El endpoint principal es:
 
+```http
+POST /persons
+```
 
-### S5.3 — Reconocimiento facial (pendiente)
+Con este servicio se cargan los datos básicos de una persona, como nombre, apellido, email y un campo extra opcional para guardar información adicional.
+
+Ejemplo de uso:
+
+```json
+{
+  "nombre": "Agustin",
+  "apellido": "Rodeyro",
+  "email": "agus@test.com",
+  "extra": {
+    "rol": "alumno"
+  }
+}
+```
+
+Cuando se recibe esta información, el backend verifica si ya existe una persona con ese email. Si no existe, crea el registro en la tabla `persons` de PostgreSQL.
+
+También se implementó el endpoint:
+
+```http
+GET /persons/{person_id}
+```
+
+Este permite consultar los datos de una persona a partir de su identificador único.
+
+En resumen, S5.1 se encarga de mantener el registro de personas que después podrán tener imágenes asociadas para reconocimiento facial.
+
+---
+
+## S5.2 — Generación de embeddings faciales
+
+Esta parte permite asociar imágenes a una persona registrada y generar sus embeddings faciales.
+
+El endpoint es:
+
+```http
+POST /persons/{person_id}/embeddings
+```
+
+Este servicio recibe una o más imágenes codificadas en base64. Cada imagen se procesa con InsightFace para detectar el rostro y generar un embedding.
+
+Un embedding es una representación matemática del rostro. En vez de guardar o comparar la imagen pixel por pixel, el modelo transforma la cara en un vector de 512 números. Ese vector resume características del rostro y permite comparar caras entre sí.
+
+El flujo interno es:
+
+1. Se recibe el `person_id`.
+2. Se verifica que la persona exista en la base de datos.
+3. Se recorren las imágenes recibidas.
+4. Cada imagen base64 se decodifica.
+5. Se lee la imagen con OpenCV.
+6. Se procesa con InsightFace.
+7. Si se detecta exactamente un rostro, se genera el embedding.
+8. El embedding se guarda en la tabla `embeddings` asociado a la persona.
+9. Si una imagen no se puede leer, no tiene rostro o tiene más de un rostro, se cuenta como rechazada.
+
+Ejemplo de respuesta:
+
+```json
+{
+  "personId": "uuid",
+  "processedImages": 1,
+  "validEmbeddings": 1,
+  "rejectedImages": 0
+}
+```
+
+Para guardar los embeddings se usa PostgreSQL con la extensión `pgvector`. Esto permite almacenar vectores de 512 dimensiones y luego buscar similitudes directamente desde la base de datos.
+
+En resumen, S5.2 toma fotos de una persona y genera la “huella matemática” de su rostro para que después pueda ser reconocida.
+
+---
+
+## S5.3 — Reconocimiento facial
+
+Esta parte permite identificar si una persona aparece en una imagen nueva.
+
+El endpoint es:
+
+```http
+POST /face-recognition
+```
+
+Este servicio recibe una imagen en base64 y un valor opcional de `threshold`, que representa el nivel mínimo de confianza requerido para aceptar un reconocimiento.
+
+Ejemplo de entrada:
+
+```json
+{
+  "image": "BASE64_DE_LA_IMAGEN",
+  "threshold": 0.8
+}
+```
+
+El flujo interno es:
+
+1. Se recibe la imagen en base64.
+2. Se decodifica y se convierte en imagen usando OpenCV.
+3. InsightFace detecta el rostro y genera un embedding de 512 dimensiones.
+4. Ese embedding se compara contra todos los embeddings guardados en la base de datos.
+5. La comparación se hace con `pgvector`, usando distancia coseno.
+6. Se selecciona el embedding más parecido.
+7. Se calcula una confianza aproximada con `confidence = 1 - distance`.
+8. Si la confianza supera el `threshold`, se devuelve la persona reconocida.
+9. Si no supera el umbral, se devuelve que no se reconoció ninguna persona.
+
+Consulta principal usada para buscar el embedding más parecido:
+
+```sql
+SELECT
+    e.id AS embedding_id,
+    e.person_id,
+    p.nombre,
+    p.apellido,
+    p.email,
+    e.vector <=> CAST(:embedding AS vector(512)) AS distance
+FROM embeddings e
+JOIN persons p ON p.id = e.person_id
+ORDER BY e.vector <=> CAST(:embedding AS vector(512))
+LIMIT 1;
+```
+
+El operador `<=>` de pgvector calcula distancia coseno. Cuanto menor es la distancia, más parecidos son los rostros.
+
+Ejemplo de respuesta cuando se reconoce una persona:
+
+```json
+{
+  "personId": "uuid",
+  "nombre": "Agustin",
+  "apellido": "Rodeyro",
+  "confidence": 1.0
+}
+```
+
+Ejemplo de respuesta cuando no se reconoce:
+
+```json
+{
+  "personId": null,
+  "nombre": null,
+  "apellido": null,
+  "confidence": 0.45
+}
+```
+
+En resumen, S5.3 toma una imagen nueva, genera la huella matemática del rostro y la compara contra las huellas guardadas para decidir si corresponde a alguna persona registrada.
+
 
 
 ---
@@ -308,10 +458,11 @@ SOA-ComputerVision-2026/
 │   ├── routers/            # Endpoints HTTP agrupados por servicio
 │   │                       # Orquestan: reciben request, llaman servicios, devuelven response.
 │   │
-│   └── services/           # Integraciones con sistemas externos
-│       ├── yolo.py         # Cliente HTTP al servicio de inferencia remoto
-│       ├── storage.py      # Upload/download de imágenes en AWS S3
-│       └── query.py        # Consultas a la base de datos (S4)
+│   └── services/
+        ├── yolo.py                 # Cliente HTTP al servicio de inferencia remoto
+        ├── storage.py              # Upload/download de imágenes en AWS S3
+        ├── query.py                # Consultas a la base de datos (S4)
+        └── insightface_service.py  # Decodificación de imágenes, detección facial y generación de embeddings
 │
 ├── inference_service/      # Servicio de inferencia YOLO — corre en la PC local
 │   ├── main.py             # FastAPI con GET /models y POST /infer
