@@ -246,13 +246,31 @@ Con este servicio se cargan los datos básicos de una persona, como nombre, apel
 
 Ejemplo de uso:
 
+```bash
+BASE_URL="https://soagmr.mooo.com"
+
+curl -k -X POST "$BASE_URL/persons" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Persona",
+    "apellido": "Prueba",
+    "email": "persona.prueba.prod@test.com",
+    "extra": {
+      "rol": "test_s5_prod"
+    }
+  }'
+```
+
+Ejemplo de respuesta:
+
 ```json
 {
-  "nombre": "Agustin",
-  "apellido": "Rodeyro",
-  "email": "agus@test.com",
+  "id": "ba2d51e1-f412-488f-a650-06a9aaed625e",
+  "nombre": "Persona",
+  "apellido": "Prueba",
+  "email": "persona.prueba.prod@test.com",
   "extra": {
-    "rol": "alumno"
+    "rol": "test_s5_prod"
   }
 }
 ```
@@ -267,6 +285,24 @@ GET /persons/{person_id}
 
 Este permite consultar los datos de una persona a partir de su identificador único.
 
+```bash
+BASE_URL="https://soagmr.mooo.com"
+PERSON_ID="ba2d51e1-f412-488f-a650-06a9aaed625e"
+
+curl -k "$BASE_URL/persons/$PERSON_ID"
+```
+Ejemplo de respuesta:
+```json
+{
+  "id": "ba2d51e1-f412-488f-a650-06a9aaed625e",
+  "nombre": "Persona",
+  "apellido": "Prueba",
+  "email": "persona.prueba.prod@test.com",
+  "extra": {
+    "rol": "test_s5_prod"
+  }
+}
+```
 En resumen, S5.1 se encarga de mantener el registro de personas que después podrán tener imágenes asociadas para reconocimiento facial.
 
 ---
@@ -297,11 +333,44 @@ El flujo interno es:
 8. El embedding se guarda en la tabla `embeddings` asociado a la persona.
 9. Si una imagen no se puede leer, no tiene rostro o tiene más de un rostro, se cuenta como rechazada.
 
-Ejemplo de respuesta:
+Primero se crea el payload a partir de una imagen JPG o PNG real:
 
+```py
+
+python3 - <<'PY'
+import base64
+import json
+
+image_path = "persona1_real.jpg"
+
+with open(image_path, "rb") as f:
+    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+with open("embedding_payload.json", "w") as f:
+    json.dump({"images": [b64]}, f)
+
+print("Payload de embeddings creado")
+print("Base64 empieza con:", b64[:30])
+print("Longitud:", len(b64))
+PY
+```
+
+Luego se envía el payload al endpoint:
+
+```bash
+
+BASE_URL="https://soagmr.mooo.com"
+PERSON_ID="ba2d51e1-f412-488f-a650-06a9aaed625e"
+
+curl -k -X POST "$BASE_URL/persons/$PERSON_ID/embeddings" \
+  -H "Content-Type: application/json" \
+  --data-binary @embedding_payload.json
+```
+
+Ejemplo de respuesta:
 ```json
 {
-  "personId": "uuid",
+  "personId": "ba2d51e1-f412-488f-a650-06a9aaed625e",
   "processedImages": 1,
   "validEmbeddings": 1,
   "rejectedImages": 0
@@ -365,19 +434,53 @@ LIMIT 1;
 
 El operador `<=>` de pgvector calcula distancia coseno. Cuanto menor es la distancia, más parecidos son los rostros.
 
-Ejemplo de respuesta cuando se reconoce una persona:
+Primero se crea el payload de reconocimiento:
+
+```py
+
+python3 - <<'PY'
+import base64
+import json
+
+image_path = "persona1_real.jpg"
+
+with open(image_path, "rb") as f:
+    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+with open("recognition_payload.json", "w") as f:
+    json.dump({
+        "image": b64,
+        "threshold": 0.8
+    }, f)
+
+print("Payload de reconocimiento creado")
+print("Base64 empieza con:", b64[:30])
+print("Longitud:", len(b64))
+PY
+```
+
+Luego se envía al endpoint:
+
+```bash
+
+BASE_URL="https://soagmr.mooo.com"
+
+curl -k -X POST "$BASE_URL/face-recognition" \
+  -H "Content-Type: application/json" \
+  --data-binary @recognition_payload.json
+```
+
+Ejemplo de respuesta si reconoce a la persona:
 
 ```json
 {
-  "personId": "uuid",
-  "nombre": "Agustin",
-  "apellido": "Rodeyro",
+  "personId": "ba2d51e1-f412-488f-a650-06a9aaed625e",
+  "nombre": "Persona",
+  "apellido": "Prueba",
   "confidence": 1.0
 }
 ```
-
-Ejemplo de respuesta cuando no se reconoce:
-
+Ejemplo de respuesta si no supera el umbral de reconocimiento:
 ```json
 {
   "personId": null,
@@ -386,10 +489,9 @@ Ejemplo de respuesta cuando no se reconoce:
   "confidence": 0.45
 }
 ```
-
 En resumen, S5.3 toma una imagen nueva, genera la huella matemática del rostro y la compara contra las huellas guardadas para decidir si corresponde a alguna persona registrada.
 
-
+> Nota: los endpoints S5.2 y S5.3 reciben imágenes codificadas en base64 dentro de un JSON, no como `multipart/form-data`. Se recomienda usar imágenes JPG o PNG reales. Si una imagen tiene extensión `.jpg` pero internamente es AVIF u otro formato no compatible con OpenCV dentro del contenedor, puede fallar la lectura.
 
 ---
 
@@ -459,10 +561,11 @@ SOA-ComputerVision-2026/
 │   │                       # Orquestan: reciben request, llaman servicios, devuelven response.
 │   │
 │   └── services/
-        ├── yolo.py                 # Cliente HTTP al servicio de inferencia remoto
-        ├── storage.py              # Upload/download de imágenes en AWS S3
-        ├── query.py                # Consultas a la base de datos (S4)
-        └── insightface_service.py  # Decodificación de imágenes, detección facial y generación de embeddings
+│   └── services/
+│       ├── yolo.py                 # Cliente HTTP al servicio de inferencia remoto
+│       ├── storage.py              # Upload/download de imágenes en AWS S3
+│       ├── query.py                # Consultas a la base de datos (S4)
+│       └── insightface_service.py  # Decodificación de imágenes, detección facial y generación de embeddings
 │
 ├── inference_service/      # Servicio de inferencia YOLO — corre en la PC local
 │   ├── main.py             # FastAPI con GET /models y POST /infer
