@@ -4,12 +4,12 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.frame import Frame
-from app.models.detection import Detection
-from app.models.file import File as FileRecord
-from app.schemas.detection import DetectionResponse
-from app.services.storage import upload_frame, StorageError
-from app.services.yolo import run_inference, get_available_models
+from app.dtos.detection import DetectionResponse
+from app.business.storage import upload_frame, StorageError
+from app.business.yolo import run_inference, get_available_models
+from app.repositories.frame_repository import FrameRepository
+from app.repositories.file_repository import FileRepository
+from app.repositories.detection_repository import DetectionRepository
 
 router = APIRouter(prefix="/detections", tags=["S2 - Detección"])
 
@@ -88,12 +88,13 @@ Ejemplo completo: `{"lat": -34.6037, "lon": -58.3816, "camara": "cam_01", "piso"
         raise HTTPException(status_code=503, detail=f"Error al guardar imagen: {e}")
 
     try:
-        frame = Frame(id=frame_id, metadata_=meta)
-        db.add(frame)
-        file = FileRecord(frame_id=frame_id, path=s3_key)
-        db.add(file)
-        detection = Detection(frame_id=frame_id, model_id=model_id, detections={"objects": detected_objects})
-        db.add(detection)
+        frame_repo = FrameRepository(db)
+        file_repo = FileRepository(db)
+        detection_repo = DetectionRepository(db)
+
+        frame_repo.create(frame_id, meta)
+        file_repo.create(frame_id, s3_key)
+        detection_repo.create(frame_id, model_id, {"objects": detected_objects})
         db.commit()
     except Exception:
         db.rollback()

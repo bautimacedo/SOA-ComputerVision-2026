@@ -150,4 +150,85 @@ flowchart TD
 
 ---
 
+## S5.1 — POST /persons
+
+```mermaid
+flowchart TD
+    A([Cliente]) --> B[POST /persons\nnombre + apellido + email + extra?]
+
+    B --> C[Consulta BD\n¿existe persona con ese email?]
+    C -- Existe --> E1[409\nYa existe una persona con ese email]
+
+    C -- No existe --> D[INSERT INTO persons\nid + nombre + apellido + email + extra]
+    D --> E[COMMIT]
+    E --> F[201\nPersonResponse\npersonId + nombre + apellido + email + extra]
+```
+
+---
+
+## S5.2 — GET /persons/{person_id}
+
+```mermaid
+flowchart TD
+    A([Cliente]) --> B[GET /persons/person_id]
+
+    B --> C{¿person_id es\nUUID válido?}
+    C -- No --> E1[422\nFormato UUID inválido]
+
+    C -- Sí --> D[Consulta BD\nWHERE id = person_id]
+    D -- No existe --> E2[404\nPersona no encontrada]
+    D -- Existe --> E[200\nPersonResponse\npersonId + nombre + apellido + email + extra]
+```
+
+---
+
+## S5.3 — POST /persons/{person_id}/embeddings
+
+```mermaid
+flowchart TD
+    A([Cliente]) --> B[POST /persons/person_id/embeddings\nmultipart: images archivos JPG/PNG]
+
+    B --> C{¿person_id es\nUUID válido?}
+    C -- No --> E1[422\nFormato UUID inválido]
+
+    C -- Sí --> D[Consulta BD\nWHERE id = person_id]
+    D -- No existe --> E2[404\nPersona no encontrada]
+
+    D -- Existe --> E[Para cada imagen en images]
+
+    E --> F[InsightFace\nget_embedding_from_bytes]
+    F -- Error\n0 o más de 1 rostro\nimagen inválida --> G[rejected_images ++\nContinúa con la siguiente]
+    F -- OK\nembedding 512 dims --> H[INSERT INTO embeddings\nperson_id + vector]
+    H --> I[valid_embeddings ++]
+
+    G --> J{¿Hay más imágenes?}
+    I --> J
+    J -- Sí --> E
+    J -- No --> K[COMMIT]
+    K --> L[200\nEmbeddingResponse\npersonId + processedImages\nvalidEmbeddings + rejectedImages]
+```
+
+---
+
+## S5.4 — POST /face-recognition
+
+```mermaid
+flowchart TD
+    A([Cliente]) --> B[POST /face-recognition\nmultipart: image archivo JPG/PNG\n+ threshold form field]
+
+    B --> C[InsightFace\nget_embedding_from_bytes]
+    C -- Error\n0 o más de 1 rostro\nimagen inválida --> E1[400\nMensaje del error]
+
+    C -- OK\nembedding 512 dims --> D[Query pgvector\nSELECT ... ORDER BY\nvector <=> embedding LIMIT 1]
+    D -- Sin resultados\n0 embeddings en BD --> E2[200\npersonId: null\nconfidence: 0.0]
+
+    D -- Resultado --> F[confidence = 1 - distance\ndistancia coseno]
+
+    F --> G{¿confidence\n>= threshold?}
+    G -- No --> E3[200\npersonId: null\nconfianza insuficiente\nconfidence: valor]
+    G -- Sí --> H[200\nRecognitionResponse\npersonId + nombre + apellido + confidence]
+```
+
+---
+
 

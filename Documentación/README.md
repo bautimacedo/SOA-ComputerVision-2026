@@ -317,7 +317,7 @@ El endpoint es:
 POST /persons/{person_id}/embeddings
 ```
 
-Este servicio recibe una o más imágenes codificadas en base64. Cada imagen se procesa con InsightFace para detectar el rostro y generar un embedding.
+Este servicio recibe una o más imágenes como `multipart/form-data`. Cada imagen se procesa con InsightFace para detectar el rostro y generar un embedding.
 
 Un embedding es una representación matemática del rostro. En vez de guardar o comparar la imagen pixel por pixel, el modelo transforma la cara en un vector de 512 números. Ese vector resume características del rostro y permite comparar caras entre sí.
 
@@ -326,54 +326,34 @@ El flujo interno es:
 1. Se recibe el `person_id`.
 2. Se verifica que la persona exista en la base de datos.
 3. Se recorren las imágenes recibidas.
-4. Cada imagen base64 se decodifica.
-5. Se lee la imagen con OpenCV.
-6. Se procesa con InsightFace.
-7. Si se detecta exactamente un rostro, se genera el embedding.
-8. El embedding se guarda en la tabla `embeddings` asociado a la persona.
-9. Si una imagen no se puede leer, no tiene rostro o tiene más de un rostro, se cuenta como rechazada.
-
-Primero se crea el payload a partir de una imagen JPG o PNG real:
-
-```py
-
-python3 - <<'PY'
-import base64
-import json
-
-image_path = "persona1_real.jpg"
-
-with open(image_path, "rb") as f:
-    b64 = base64.b64encode(f.read()).decode("utf-8")
-
-with open("embedding_payload.json", "w") as f:
-    json.dump({"images": [b64]}, f)
-
-print("Payload de embeddings creado")
-print("Base64 empieza con:", b64[:30])
-print("Longitud:", len(b64))
-PY
-```
-
-Luego se envía el payload al endpoint:
+4. Se lee cada imagen con OpenCV directamente desde los bytes del archivo.
+5. Se procesa con InsightFace.
+6. Si se detecta exactamente un rostro, se genera el embedding.
+7. El embedding se guarda en la tabla `embeddings` asociado a la persona.
+8. Si una imagen no se puede leer, no tiene rostro o tiene más de un rostro, se cuenta como rechazada.
 
 ```bash
+BASE_URL=”https://soagmr.mooo.com”
+PERSON_ID=”ba2d51e1-f412-488f-a650-06a9aaed625e”
 
-BASE_URL="https://soagmr.mooo.com"
-PERSON_ID="ba2d51e1-f412-488f-a650-06a9aaed625e"
+# Una imagen
+curl -k -X POST “$BASE_URL/persons/$PERSON_ID/embeddings” \
+  -F “images=@foto1.jpg”
 
-curl -k -X POST "$BASE_URL/persons/$PERSON_ID/embeddings" \
-  -H "Content-Type: application/json" \
-  --data-binary @embedding_payload.json
+# Varias imágenes en la misma request
+curl -k -X POST “$BASE_URL/persons/$PERSON_ID/embeddings” \
+  -F “images=@foto1.jpg” \
+  -F “images=@foto2.jpg” \
+  -F “images=@foto3.jpg”
 ```
 
 Ejemplo de respuesta:
 ```json
 {
-  "personId": "ba2d51e1-f412-488f-a650-06a9aaed625e",
-  "processedImages": 1,
-  "validEmbeddings": 1,
-  "rejectedImages": 0
+  “personId”: “ba2d51e1-f412-488f-a650-06a9aaed625e”,
+  “processedImages”: 3,
+  “validEmbeddings”: 2,
+  “rejectedImages”: 1
 }
 ```
 
@@ -393,21 +373,12 @@ El endpoint es:
 POST /face-recognition
 ```
 
-Este servicio recibe una imagen en base64 y un valor opcional de `threshold`, que representa el nivel mínimo de confianza requerido para aceptar un reconocimiento.
-
-Ejemplo de entrada:
-
-```json
-{
-  "image": "BASE64_DE_LA_IMAGEN",
-  "threshold": 0.8
-}
-```
+Este servicio recibe una imagen como `multipart/form-data` y un `threshold` opcional (campo de formulario), que representa el nivel mínimo de confianza requerido para aceptar un reconocimiento.
 
 El flujo interno es:
 
-1. Se recibe la imagen en base64.
-2. Se decodifica y se convierte en imagen usando OpenCV.
+1. Se recibe la imagen como archivo.
+2. Se lee con OpenCV directamente desde los bytes del archivo.
 3. InsightFace detecta el rostro y genera un embedding de 512 dimensiones.
 4. Ese embedding se compara contra todos los embeddings guardados en la base de datos.
 5. La comparación se hace con `pgvector`, usando distancia coseno.
@@ -434,40 +405,17 @@ LIMIT 1;
 
 El operador `<=>` de pgvector calcula distancia coseno. Cuanto menor es la distancia, más parecidos son los rostros.
 
-Primero se crea el payload de reconocimiento:
-
-```py
-
-python3 - <<'PY'
-import base64
-import json
-
-image_path = "persona1_real.jpg"
-
-with open(image_path, "rb") as f:
-    b64 = base64.b64encode(f.read()).decode("utf-8")
-
-with open("recognition_payload.json", "w") as f:
-    json.dump({
-        "image": b64,
-        "threshold": 0.8
-    }, f)
-
-print("Payload de reconocimiento creado")
-print("Base64 empieza con:", b64[:30])
-print("Longitud:", len(b64))
-PY
-```
-
-Luego se envía al endpoint:
-
 ```bash
-
 BASE_URL="https://soagmr.mooo.com"
 
+# Con threshold por defecto (0.8)
 curl -k -X POST "$BASE_URL/face-recognition" \
-  -H "Content-Type: application/json" \
-  --data-binary @recognition_payload.json
+  -F "image=@persona.jpg"
+
+# Con threshold personalizado
+curl -k -X POST "$BASE_URL/face-recognition" \
+  -F "image=@persona.jpg" \
+  -F "threshold=0.75"
 ```
 
 Ejemplo de respuesta si reconoce a la persona:
@@ -491,7 +439,7 @@ Ejemplo de respuesta si no supera el umbral de reconocimiento:
 ```
 En resumen, S5.3 toma una imagen nueva, genera la huella matemática del rostro y la compara contra las huellas guardadas para decidir si corresponde a alguna persona registrada.
 
-> Nota: los endpoints S5.2 y S5.3 reciben imágenes codificadas en base64 dentro de un JSON, no como `multipart/form-data`. Se recomienda usar imágenes JPG o PNG reales. Si una imagen tiene extensión `.jpg` pero internamente es AVIF u otro formato no compatible con OpenCV dentro del contenedor, puede fallar la lectura.
+> Se recomienda usar imágenes JPG o PNG reales. Si una imagen tiene extensión `.jpg` pero internamente es AVIF u otro formato no compatible con OpenCV dentro del contenedor, puede fallar la lectura.
 
 ---
 
@@ -547,25 +495,26 @@ La relación es: **nginx** recibe la request en el puerto 80/443 → la pasa a *
 SOA-ComputerVision-2026/
 │
 ├── app/                    # Código del servidor principal
-│   ├── main.py             # Punto de entrada: registra routers, crea tablas
+│   ├── main.py             # Punto de entrada: registra controllers, crea tablas
 │   ├── config.py           # Variables de entorno centralizadas (pydantic-settings)
 │   ├── database.py         # Conexión SQLAlchemy y función get_db()
 │   │
-│   ├── models/             # Definición de tablas de base de datos (SQLAlchemy)
+│   ├── entities/           # Clases de dominio — tablas de la base de datos (SQLAlchemy @Entity)
 │   │                       # Cada archivo = una tabla. No contienen lógica.
 │   │
-│   ├── schemas/            # Definición de request/response de la API (Pydantic)
-│   │                       # Validan lo que entra y serializan lo que sale.
+│   ├── dtos/               # Objetos de transferencia de datos (Pydantic)
+│   │                       # Validan lo que entra y serializan lo que sale de la API.
 │   │
-│   ├── routers/            # Endpoints HTTP agrupados por servicio
-│   │                       # Orquestan: reciben request, llaman servicios, devuelven response.
+│   ├── controllers/        # Endpoints HTTP agrupados por servicio (@RestController)
+│   │                       # Reciben el request, delegan en repositories y business, devuelven response.
 │   │
-│   └── services/
-│   └── services/
+│   ├── repositories/       # Acceso a datos — queries a PostgreSQL (@Repository)
+│   │                       # Cada clase encapsula las operaciones de BD de una entidad.
+│   │
+│   └── business/           # Lógica de negocio y clientes externos (@Service)
 │       ├── yolo.py                 # Cliente HTTP al servicio de inferencia remoto
 │       ├── storage.py              # Upload/download de imágenes en AWS S3
-│       ├── query.py                # Consultas a la base de datos (S4)
-│       └── insightface_service.py  # Decodificación de imágenes, detección facial y generación de embeddings
+│       └── insightface_service.py  # Detección facial y generación de embeddings con InsightFace
 │
 ├── inference_service/      # Servicio de inferencia YOLO — corre en la PC local
 │   ├── main.py             # FastAPI con GET /models y POST /infer
@@ -591,13 +540,15 @@ SOA-ComputerVision-2026/
 └── .env.example            # Plantilla de configuración
 ```
 
-La separación en `models/`, `schemas/` y `routers/` no es arbitraria. Cada capa tiene una responsabilidad única:
+La separación en capas no es arbitraria. Cada una tiene una responsabilidad única:
 
-- `models/` solo describe cómo se guardan los datos en PostgreSQL.
-- `schemas/` solo describe cómo se ven los datos en la API.
-- `routers/` conecta ambos mundos: recibe el request validado por los schemas, accede a la BD a través de los models, y devuelve la response.
+- `entities/` solo describe cómo se guardan los datos en PostgreSQL (equivalente a `@Entity` en Spring).
+- `dtos/` solo describe cómo se ven los datos en la API — qué entra y qué sale (equivalente a los DTOs en Spring).
+- `repositories/` encapsula todas las queries a la base de datos (equivalente a `@Repository` / JPA en Spring).
+- `business/` contiene la lógica de negocio y los clientes a servicios externos (equivalente a `@Service` en Spring).
+- `controllers/` recibe el request HTTP, delega en `repositories` y `business`, y devuelve la response (equivalente a `@RestController` en Spring).
 
-Esto hace que un cambio en la BD no rompa la API y viceversa.
+Esto hace que un cambio en la BD no rompa la API y viceversa, y que la lógica de acceso a datos quede centralizada en los repositories.
 
 ### Base de datos — PostgreSQL con pgvector
 

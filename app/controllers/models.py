@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from app.services.yolo import get_available_models
+from app.business.yolo import get_available_models
 
 router = APIRouter(prefix="/models", tags=["S1 - Modelos"])
 

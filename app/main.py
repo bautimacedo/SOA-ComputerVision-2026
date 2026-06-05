@@ -1,7 +1,7 @@
 from fastapi import FastAPI
-from app.routers import models, detections, frames, persons, recognition
+from app.controllers import models, detections, frames, persons, recognition
 from app.database import engine, Base
-import app.models
+import app.entities
 
 Base.metadata.create_all(bind=engine)
 

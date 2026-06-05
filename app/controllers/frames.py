@@ -4,10 +4,10 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from app.database import get_db
-from app.models.file import File
-from app.schemas.frame import FrameSearchResult
-from app.services.storage import get_frame_image
-from app.services.query import search_frames
+from app.dtos.frame import FrameSearchResult
+from app.business.storage import get_frame_image
+from app.repositories.frame_repository import FrameRepository
+from app.repositories.file_repository import FileRepository
 
 router = APIRouter(prefix="/frames", tags=["S3/S4 - Fotogramas"])
 
@@ -81,7 +81,7 @@ Ejemplo: `{"camara":"cam_01","piso":3}`""",
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="metadata debe ser un JSON válido")
 
-    return search_frames(db, lat_min, lat_max, lon_min, lon_max, classes, extra_metadata, model_id)
+    return FrameRepository(db).search(lat_min, lat_max, lon_min, lon_max, classes, extra_metadata, model_id)
 
 
 @router.get(
@@ -106,7 +106,7 @@ def get_frame(
     thumbnail: bool = Query(default=False, description="Si es `true`, devuelve la imagen reducida a máximo 320×320 px."),
     db: Session = Depends(get_db),
 ):
-    file_record = db.query(File).filter(File.frame_id == frame_id).first()
+    file_record = FileRepository(db).get_by_frame_id(frame_id)
     if not file_record:
         raise HTTPException(status_code=404, detail="Frame not found")
     image_data, content_type = get_frame_image(file_record.path, thumbnail)

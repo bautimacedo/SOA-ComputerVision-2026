@@ -178,4 +178,154 @@ sequenceDiagram
 
 ---
 
+## S5.1 — POST /persons
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant N as nginx
+    participant F as FastAPI
+    participant DB as PostgreSQL
+
+    C->>N: POST /persons<br/>{"nombre":"Juan","apellido":"Pérez",<br/>"email":"juan@mail.com","extra":{...}}<br/>HTTPS :443
+    N->>F: POST /persons<br/>HTTP :8000
+
+    F->>DB: SELECT * FROM persons<br/>WHERE email = 'juan@mail.com'
+
+    alt Email ya registrado
+        DB-->>F: 1 row
+        F-->>N: 409 Ya existe una persona con ese email
+        N-->>C: 409
+    else Email disponible
+        DB-->>F: 0 rows
+        F->>DB: INSERT INTO persons<br/>(id, nombre, apellido, email, extra, created_at)
+        DB-->>F: COMMIT OK
+        F-->>N: 201 Created<br/>{"personId":"uuid","nombre":"Juan",<br/>"apellido":"Pérez","email":"juan@mail.com","extra":{...}}
+        N-->>C: 201 Created<br/>{personId, nombre, apellido, email, extra}
+    end
+```
+
+---
+
+## S5.2 — GET /persons/{person_id}
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant N as nginx
+    participant F as FastAPI
+    participant DB as PostgreSQL
+
+    C->>N: GET /persons/{person_id}<br/>HTTPS :443
+    N->>F: GET /persons/{person_id}<br/>HTTP :8000
+
+    Note over F: Valida formato UUID
+
+    F->>DB: SELECT * FROM persons<br/>WHERE id = {person_id}
+
+    alt Persona no existe
+        DB-->>F: 0 rows
+        F-->>N: 404 Persona no encontrada
+        N-->>C: 404
+    else Persona existe
+        DB-->>F: 1 row
+        F-->>N: 200 OK<br/>{"personId":"uuid","nombre":"Juan",<br/>"apellido":"Pérez","email":"juan@mail.com","extra":{...}}
+        N-->>C: 200 OK<br/>{personId, nombre, apellido, email, extra}
+    end
+```
+
+---
+
+## S5.3 — POST /persons/{person_id}/embeddings
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant N as nginx
+    participant F as FastAPI
+    participant IF as InsightFace (buffalo_l)
+    participant DB as PostgreSQL
+
+    C->>N: POST /persons/{person_id}/embeddings<br/>multipart/form-data<br/>images=foto1.jpg, images=foto2.jpg, ...<br/>HTTPS :443
+    N->>F: POST /persons/{person_id}/embeddings<br/>HTTP :8000
+
+    Note over F: Valida formato UUID
+
+    F->>DB: SELECT * FROM persons<br/>WHERE id = {person_id}
+
+    alt Persona no existe
+        DB-->>F: 0 rows
+        F-->>N: 404 Persona no encontrada
+        N-->>C: 404
+    else Persona existe
+        DB-->>F: 1 row
+
+        loop Para cada imagen en images
+            F->>IF: get_embedding_from_bytes(image_bytes)
+            Note over IF: Decodifica bytes → OpenCV<br/>Detecta rostros con RetinaFace<br/>Extrae embedding ArcFace (512 dims)
+            alt Error — 0 o más de 1 rostro / imagen inválida
+                IF-->>F: ValueError
+                Note over F: rejected_images++<br/>Continúa con la siguiente imagen
+            else OK
+                IF-->>F: embedding: [float x 512]
+                F->>DB: INSERT INTO embeddings<br/>(id, person_id, vector)<br/>vector = pgvector(512)
+                Note over F: valid_embeddings++
+            end
+        end
+
+        F->>DB: COMMIT
+        DB-->>F: OK
+        F-->>N: 200 OK<br/>{"personId":"uuid",<br/>"processedImages":3,<br/>"validEmbeddings":2,<br/>"rejectedImages":1}
+        N-->>C: 200 OK<br/>{personId, processedImages, validEmbeddings, rejectedImages}
+    end
+```
+
+---
+
+## S5.4 — POST /face-recognition
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant N as nginx
+    participant F as FastAPI
+    participant IF as InsightFace (buffalo_l)
+    participant DB as PostgreSQL
+
+    C->>N: POST /face-recognition<br/>multipart/form-data<br/>image=persona.jpg, threshold=0.8<br/>HTTPS :443
+    N->>F: POST /face-recognition<br/>HTTP :8000
+
+    F->>IF: get_embedding_from_bytes(image_bytes)
+    Note over IF: Decodifica bytes → OpenCV<br/>Detecta rostros con RetinaFace<br/>Extrae embedding ArcFace (512 dims)
+
+    alt Error — 0 o más de 1 rostro / imagen inválida
+        IF-->>F: ValueError
+        F-->>N: 400 Mensaje del error
+        N-->>C: 400
+    else OK
+        IF-->>F: embedding: [float x 512]
+
+        F->>DB: SELECT e.person_id, p.nombre, p.apellido,<br/>e.vector <=> CAST(:emb AS vector(512)) AS distance<br/>FROM embeddings e JOIN persons p ON p.id = e.person_id<br/>ORDER BY distance LIMIT 1
+
+        alt Sin embeddings en BD
+            DB-->>F: 0 rows
+            F-->>N: 200 OK {"personId":null,"confidence":0.0}
+            N-->>C: 200 OK (sin identidad)
+        else Resultado encontrado
+            DB-->>F: {person_id, nombre, apellido, distance}
+            Note over F: confidence = 1.0 - distance
+
+            alt confidence < threshold
+                F-->>N: 200 OK {"personId":null,"confidence":valor}
+                N-->>C: 200 OK (confianza insuficiente)
+            else confidence >= threshold
+                F-->>N: 200 OK<br/>{"personId":"uuid",<br/>"nombre":"Juan",<br/>"apellido":"Pérez",<br/>"confidence":0.87}
+                N-->>C: 200 OK (match encontrado)
+            end
+        end
+    end
+```
+
+---
+
 

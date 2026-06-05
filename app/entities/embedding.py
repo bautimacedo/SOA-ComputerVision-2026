@@ -10,5 +10,5 @@ class Embedding(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     person_id = Column(UUID(as_uuid=True), ForeignKey("persons.id"), nullable=False)
-    vector = Column(Vector(512))   # InsightFace usa embeddings de 512 dims
+    vector = Column(Vector(512))
     created_at = Column(DateTime, server_default=func.now())

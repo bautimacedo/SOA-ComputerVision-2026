@@ -41,16 +41,6 @@ class PersonResponse(BaseModel):
     extra: dict[str, Any] | None = None
 
 
-class EmbeddingRequest(BaseModel):
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "images": ["<base64_imagen_1>", "<base64_imagen_2>"]
-        }
-    })
-
-    images: list[str]
-
-
 class EmbeddingResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -65,18 +55,6 @@ class EmbeddingResponse(BaseModel):
     processedImages: int
     validEmbeddings: int
     rejectedImages: int
-
-
-class RecognitionRequest(BaseModel):
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "image": "<base64_imagen>",
-            "threshold": 0.8
-        }
-    })
-
-    image: str
-    threshold: float = Field(default=0.8, ge=0.0, le=1.0, description="Umbral mínimo de similitud. Rango: 0.0–1.0")
 
 
 class RecognitionResponse(BaseModel):
