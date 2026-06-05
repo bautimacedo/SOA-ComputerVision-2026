@@ -79,8 +79,8 @@ app = FastAPI(
 
 app.include_router(s1_router)
 app.include_router(s2_router)
-app.include_router(s3_router)
-app.include_router(s4_router)
+app.include_router(s4_router)  # /frames/search — debe ir antes que /{frame_id}
+app.include_router(s3_router)  # /frames/{frame_id}
 app.include_router(persons_router)
 app.include_router(recognition_router)
 
