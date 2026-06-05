@@ -2,21 +2,22 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import and_, cast, Float, exists
 from uuid import UUID
 
-from app.entities.frame import Frame
-from app.entities.detection import Detection
-from app.dtos.frame import FrameSearchResult
-from app.config import settings
+import app.entities.frame
+import app.entities.detection
+import app.dtos.frame
+import app.config
 
 
 class FrameRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def create(self, frame_id: UUID, metadata: dict) -> Frame:
-        frame = Frame(id=frame_id, metadata_=metadata)
+    def create(self, frame_id: UUID, metadata: dict) -> app.entities.frame.Frame:
+        frame = app.entities.frame.Frame(id=frame_id, metadata_=metadata)
         self.db.add(frame)
         return frame
 
+    # función para filtrar en la base de datos.
     def search(
         self,
         lat_min: float,
@@ -26,29 +27,29 @@ class FrameRepository:
         classes: list[str],
         extra_metadata: dict | None,
         model_id: str | None,
-    ) -> list[FrameSearchResult]:
+    ) -> list[app.dtos.frame.FrameSearchResult]:
         query = (
-            self.db.query(Frame)
-            .options(selectinload(Frame.detections))
+            self.db.query(app.entities.frame.Frame)
+            .options(selectinload(app.entities.frame.Frame.detections))
             .filter(
                 and_(
-                    cast(Frame.metadata_["lat"].astext, Float) >= lat_min,
-                    cast(Frame.metadata_["lat"].astext, Float) <= lat_max,
-                    cast(Frame.metadata_["lon"].astext, Float) >= lon_min,
-                    cast(Frame.metadata_["lon"].astext, Float) <= lon_max,
+                    cast(app.entities.frame.Frame.metadata_["lat"].astext, Float) >= lat_min,
+                    cast(app.entities.frame.Frame.metadata_["lat"].astext, Float) <= lat_max,
+                    cast(app.entities.frame.Frame.metadata_["lon"].astext, Float) >= lon_min,
+                    cast(app.entities.frame.Frame.metadata_["lon"].astext, Float) <= lon_max,
                 )
             )
         )
 
         if extra_metadata:
             for key, value in extra_metadata.items():
-                query = query.filter(Frame.metadata_[key].astext == str(value))
+                query = query.filter(app.entities.frame.Frame.metadata_[key].astext == str(value))
 
         if model_id:
             query = query.filter(
                 exists().where(
-                    Detection.frame_id == Frame.id,
-                    Detection.model_id == model_id,
+                    app.entities.detection.Detection.frame_id == app.entities.frame.Frame.id,
+                    app.entities.detection.Detection.model_id == model_id,
                 )
             )
 
@@ -68,9 +69,9 @@ class FrameRepository:
                     continue
 
             results.append(
-                FrameSearchResult(
+                app.dtos.frame.FrameSearchResult(
                     frameId=frame.id,
-                    imageURL=f"{settings.base_url}/frames/{frame.id}",
+                    imageURL=f"{app.config.settings.base_url}/frames/{frame.id}",
                     metadata=frame.metadata_,
                     detections=detection_list,
                 )

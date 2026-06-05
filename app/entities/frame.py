@@ -2,10 +2,10 @@ from sqlalchemy import Column, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 import uuid
-from app.database import Base
+import app.database
 
 
-class Frame(Base):
+class Frame(app.database.Base):
     __tablename__ = "frames"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

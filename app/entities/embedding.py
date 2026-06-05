@@ -2,10 +2,10 @@ from sqlalchemy import Column, DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 from pgvector.sqlalchemy import Vector
-from app.database import Base
+import app.database
 
 
-class Embedding(Base):
+class Embedding(app.database.Base):
     __tablename__ = "embeddings"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

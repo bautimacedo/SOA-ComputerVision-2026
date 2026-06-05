@@ -8,6 +8,7 @@ class InsightFaceService:
         self.app = FaceAnalysis(name="buffalo_l")
         self.app.prepare(ctx_id=-1, det_size=(640, 640))  # CPU
 
+    # obtenemos los embedings de la foto.
     def get_embedding_from_bytes(self, image_bytes: bytes) -> list[float]:
         image_array = np.frombuffer(image_bytes, np.uint8)
         image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)

@@ -1,20 +1,17 @@
 import json
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from uuid import UUID
 
-from app.database import get_db
-from app.dtos.frame import FrameSearchResult
-from app.business.storage import get_frame_image
-from app.repositories.frame_repository import FrameRepository
-from app.repositories.file_repository import FileRepository
+import app.database
+import app.dtos.frame
+import app.repositories.frame_repository
 
-router = APIRouter(prefix="/frames", tags=["S3/S4 - Fotogramas"])
+router = APIRouter(prefix="/frames", tags=["S4 - Búsqueda"])
 
 
 @router.get(
     "/search",
-    response_model=list[FrameSearchResult],
+    response_model=list[app.dtos.frame.FrameSearchResult],
     summary="Buscar fotogramas por ubicación, modelo, clase y metadatos",
     description="""
 Consulta fotogramas previamente procesados. Todos los filtros son opcionales excepto las coordenadas,
@@ -52,6 +49,7 @@ El campo `imageURL` en cada resultado apunta al endpoint S3 para recuperar la im
         400: {"description": "`lat_min > lat_max`, `lon_min > lon_max`, o `metadata` no es un JSON válido."},
     },
 )
+#query --> viene en el string
 def search(
     lat_min: float = Query(..., description="Latitud mínima del rango.", example=-35.0),
     lat_max: float = Query(..., description="Latitud máxima del rango.", example=-34.0),
@@ -65,7 +63,7 @@ def search(
 Si un fotograma no tiene el campo indicado, no aparece en los resultados.
 Ejemplo: `{"camara":"cam_01","piso":3}`""",
     ),
-    db: Session = Depends(get_db),
+    db: Session = Depends(app.database.get_db),
 ):
     if lat_min > lat_max:
         raise HTTPException(status_code=400, detail="lat_min debe ser <= lat_max")
@@ -75,39 +73,11 @@ Ejemplo: `{"camara":"cam_01","piso":3}`""",
     extra_metadata = None
     if metadata:
         try:
+            #parseamos
             extra_metadata = json.loads(metadata)
             if not isinstance(extra_metadata, dict):
                 raise HTTPException(status_code=400, detail="metadata debe ser un objeto JSON")
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="metadata debe ser un JSON válido")
 
-    return FrameRepository(db).search(lat_min, lat_max, lon_min, lon_max, classes, extra_metadata, model_id)
-
-
-@router.get(
-    "/{frame_id}",
-    summary="Recuperar imagen por ID",
-    description="""
-Descarga la imagen asociada a un fotograma desde AWS S3 y la devuelve como binario puro JPEG.
-
-El parámetro `thumbnail` permite obtener una versión reducida de la imagen (máximo 320×320 píxeles,
-manteniendo la proporción original) útil para previsualizaciones.
-
-La imagen **no se almacena en el servidor** — se descarga de S3 en memoria y se devuelve como binario puro en el body del response HTTP (`Content-Type: image/jpeg`).
-""",
-    response_description="Imagen en formato JPEG como binario puro.",
-    responses={
-        404: {"description": "No existe ningún archivo asociado a ese frameId."},
-        422: {"description": "El frameId no tiene formato UUID válido."},
-    },
-)
-def get_frame(
-    frame_id: UUID,
-    thumbnail: bool = Query(default=False, description="Si es `true`, devuelve la imagen reducida a máximo 320×320 px."),
-    db: Session = Depends(get_db),
-):
-    file_record = FileRepository(db).get_by_frame_id(frame_id)
-    if not file_record:
-        raise HTTPException(status_code=404, detail="Frame not found")
-    image_data, content_type = get_frame_image(file_record.path, thumbnail)
-    return Response(content=image_data.read(), media_type=content_type)
+    return app.repositories.frame_repository.FrameRepository(db).search(lat_min, lat_max, lon_min, lon_max, classes, extra_metadata, model_id) # se filtra en la db
