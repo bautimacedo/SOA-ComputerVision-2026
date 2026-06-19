@@ -38,5 +38,5 @@ def _make_thumbnail(image_bytes: bytes, max_size: tuple = (320, 320)) -> bytes:
     with Image.open(io.BytesIO(image_bytes)) as img: #pillow no puede abrir bytes crudos directamente, necesita un objeto tipo archivo, por eso envolvemos en BytesIO
         img.thumbnail(max_size)
         buf = io.BytesIO()
-        img.save(buf, format="JPEG")
-        return buf.getvalue()  # devuelve los bytes 
+        img.convert("RGB").save(buf, format="JPEG")
+        return buf.getvalue()  # devuelve los bytes

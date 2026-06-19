@@ -35,4 +35,6 @@ def get_frame(
     if not file_record:
         raise HTTPException(status_code=404, detail="Frame not found")
     image_data, content_type = app.business.s3.get_frame_image(file_record.path, thumbnail) #buscamos el frame en el s3
+    if image_data is None:
+        raise HTTPException(status_code=404, detail="Imagen no encontrada en S3")
     return Response(content=image_data.read(), media_type=content_type)
