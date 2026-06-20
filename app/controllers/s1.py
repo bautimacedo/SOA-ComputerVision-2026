@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 import app.business.s1
+import app.security
 
 # Todos los endpoint de este router van a vivir bajo /models (igual tenemos uno solo)
-router = APIRouter(prefix="/models", tags=["S1 - Modelos"])
+router = APIRouter(prefix="/models", tags=["S1 - Modelos"], dependencies=[Depends(app.security.get_current_user)])
 
 # Responde a /models
 # Es asincronico. Levanta un hilo por cada request que se realice.

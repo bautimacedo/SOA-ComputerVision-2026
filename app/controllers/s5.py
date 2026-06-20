@@ -8,9 +8,10 @@ import app.dtos.person
 import app.business.s5
 import app.repositories.person_repository
 import app.repositories.embedding_repository
+import app.security
 
-persons_router = APIRouter(prefix="/persons", tags=["S5 - Personas y Reconocimiento Facial"])
-recognition_router = APIRouter(prefix="/face-recognition", tags=["S5 - Personas y Reconocimiento Facial"])
+persons_router = APIRouter(prefix="/persons", tags=["S5 - Personas y Reconocimiento Facial"], dependencies=[Depends(app.security.get_current_user)])
+recognition_router = APIRouter(prefix="/face-recognition", tags=["S5 - Personas y Reconocimiento Facial"], dependencies=[Depends(app.security.get_current_user)])
 
 
 # S5.1 — Registrar persona

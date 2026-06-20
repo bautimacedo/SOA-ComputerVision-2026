@@ -5,8 +5,9 @@ from uuid import UUID
 import app.database
 import app.business.s3
 import app.repositories.file_repository
+import app.security
 
-router = APIRouter(prefix="/frames", tags=["S3 - Fotogramas"])
+router = APIRouter(prefix="/frames", tags=["S3 - Fotogramas"], dependencies=[Depends(app.security.get_current_user)])
 
 # GET /frames/{frame_id}
 @router.get(

@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 import app.database
 import app.dtos.frame
 import app.repositories.frame_repository
+import app.security
 
-router = APIRouter(prefix="/frames", tags=["S4 - Búsqueda"])
+router = APIRouter(prefix="/frames", tags=["S4 - Búsqueda"], dependencies=[Depends(app.security.get_current_user)])
 
 
 @router.get(

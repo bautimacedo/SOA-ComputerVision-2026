@@ -9,6 +9,7 @@ Muestra exactamente cómo viajan los datos entre cada componente del sistema par
 - **PostgreSQL** — base de datos, contenedor Docker en el VPS, puerto 5432 interno
 - **AWS S3** — almacenamiento de objetos, internet
 - **PC local** — servicio de inferencia YOLO, conectado vía Tailscale, puerto 8001
+- **Keycloak** — servidor de identidad (IAM), contenedor Docker en el VPS, puerto 8080 interno. Tiene su propia base de datos (`keycloak_db`), no se muestra por separado en estos diagramas — se trata como una caja única, igual que "PC local" para el servicio de inferencia.
 
 ---
 
@@ -328,4 +329,191 @@ sequenceDiagram
 
 ---
 
+## Auth.1 — POST /auth/register
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant N as nginx
+    participant F as FastAPI
+    participant DB as PostgreSQL
+    participant KC as Keycloak
+
+    C->>N: POST /auth/register<br/>{"nombre":"Juan","apellido":"Pérez",<br/>"email":"juan@mail.com","password":"Secreto123!"}<br/>HTTPS :443
+    N->>F: POST /auth/register<br/>HTTP :8000
+
+    F->>DB: SELECT * FROM persons<br/>WHERE email = 'juan@mail.com'
+
+    alt Email ya registrado localmente
+        DB-->>F: 1 row
+        F-->>N: 409 Ya existe una persona con ese email
+        N-->>C: 409
+    else Email disponible
+        DB-->>F: 0 rows
+
+        Note over F: Client Credentials Grant —<br/>la app se autentica como sí misma,<br/>no hay usuario humano involucrado
+
+        F->>KC: POST /realms/soa-realm/protocol/openid-connect/token<br/>grant_type=client_credentials<br/>client_id + client_secret
+        KC-->>F: 200<br/>{"access_token": "&lt;service_token&gt;"}
+
+        Note over F: service_token representa al<br/>service account soa-client,<br/>con el rol manage-users
+
+        F->>KC: POST /admin/realms/soa-realm/users<br/>Authorization: Bearer service_token<br/>{"username":"juan@mail.com","email":"juan@mail.com",<br/>"enabled":true,"emailVerified":true,<br/>"credentials":[{"type":"password","value":"Secreto123!","temporary":false}]}
+
+        alt Usuario ya existe en Keycloak
+            KC-->>F: 409 Conflict
+            F-->>N: 409 Ya existe un usuario con ese email en Keycloak
+            N-->>C: 409
+        else Creado
+            KC-->>F: 201 Created<br/>Header Location: .../users/{keycloak_id}
+            Note over F: Extrae el UUID del final<br/>de la URL en Location
+
+            F->>DB: INSERT INTO persons<br/>(id, nombre, apellido, email, keycloak_id, created_at)
+
+            alt Falla el INSERT o el COMMIT local
+                DB-->>F: Exception
+                F->>DB: ROLLBACK
+                Note over F: Compensación: el usuario quedó<br/>creado en Keycloak pero no en persons.<br/>Hay que revertir el lado de Keycloak.
+                F->>KC: DELETE /admin/realms/soa-realm/users/{keycloak_id}<br/>Authorization: Bearer service_token
+                KC-->>F: 204 No Content
+                F-->>N: Excepción propagada (500)
+                N-->>C: Error
+            else OK
+                DB-->>F: COMMIT OK
+                F-->>N: 201 Created<br/>{"personId":"uuid","nombre":"Juan",<br/>"apellido":"Pérez","email":"juan@mail.com","extra":null}
+                N-->>C: 201 Created<br/>{personId, nombre, apellido, email, extra}
+            end
+        end
+    end
+```
+
+---
+
+## Auth.2 — POST /auth/login
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant N as nginx
+    participant F as FastAPI
+    participant KC as Keycloak
+    participant DB as PostgreSQL
+
+    C->>N: POST /auth/login<br/>{"email":"juan@mail.com","password":"Secreto123!"}<br/>HTTPS :443
+    N->>F: POST /auth/login<br/>HTTP :8000
+
+    Note over F: Direct Access Grant —<br/>el backend reenvía la contraseña<br/>directo a Keycloak, sin redirects
+
+    F->>KC: POST /realms/soa-realm/protocol/openid-connect/token<br/>grant_type=password<br/>client_id + client_secret<br/>username=juan@mail.com&password=Secreto123!
+
+    alt Keycloak caído
+        KC-->>F: ConnectionError
+        F-->>N: 503 Keycloak unreachable
+        N-->>C: 503
+    else Credenciales inválidas
+        KC-->>F: 400/401<br/>{"error":"invalid_grant",<br/>"error_description":"Invalid user credentials"}
+        F-->>N: 401 Credenciales inválidas
+        N-->>C: 401
+    else OK
+        KC-->>F: 200<br/>{"access_token":"&lt;jwt&gt;","refresh_token":"&lt;jwt&gt;",<br/>"expires_in":300,"refresh_expires_in":1800}
+
+        Note over F: jwt.decode(access_token, verify_signature=False)<br/>Solo para leer el claim "sub" —<br/>no hace falta verificar la firma:<br/>el token llegó en una respuesta<br/>directa de Keycloak que el propio<br/>backend acaba de solicitar
+
+        F->>DB: SELECT * FROM persons<br/>WHERE keycloak_id = sub
+
+        alt Existe registro local
+            DB-->>F: 1 row
+        else No existe (ej. usuario sin perfil de negocio)
+            DB-->>F: 0 rows<br/>person = null
+        end
+
+        F-->>N: 200 OK<br/>{"access_token":"...","refresh_token":"...",<br/>"expires_in":300,"person":{"personId":"uuid",...} | null}
+        N-->>C: 200 OK
+    end
+```
+
+---
+
+## Auth.3 — POST /auth/refresh
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant N as nginx
+    participant F as FastAPI
+    participant KC as Keycloak
+
+    C->>N: POST /auth/refresh<br/>{"refresh_token":"&lt;jwt&gt;"}<br/>HTTPS :443
+    N->>F: POST /auth/refresh<br/>HTTP :8000
+
+    F->>KC: POST /realms/soa-realm/protocol/openid-connect/token<br/>grant_type=refresh_token<br/>client_id + client_secret<br/>refresh_token=&lt;jwt&gt;
+
+    alt Keycloak caído
+        KC-->>F: ConnectionError
+        F-->>N: 503 Keycloak unreachable
+        N-->>C: 503
+    else Refresh token inválido, revocado o expirado
+        KC-->>F: 400/401
+        F-->>N: 401 Refresh token inválido o expirado
+        N-->>C: 401
+    else OK
+        KC-->>F: 200<br/>{"access_token":"&lt;jwt nuevo&gt;",<br/>"refresh_token":"&lt;jwt nuevo&gt;","expires_in":300}
+        F-->>N: 200 OK<br/>{"access_token":"...","refresh_token":"...","expires_in":300}
+        N-->>C: 200 OK
+    end
+```
+
+---
+
+## Validación de JWT en un endpoint protegido (aplica a S1, S2, S3, S4 y S5)
+
+Desde que se agregó Auth, **todos** los endpoints de S1 a S5 quedaron detrás de esta validación — se ejecuta automáticamente antes de cualquiera de ellos, vía `dependencies=[Depends(get_current_user)]` a nivel de cada `APIRouter`. Este diagrama reemplaza, como primer paso, a cualquiera de los diagramas anteriores de S1-S5: la request solo llega al flujo específico de cada endpoint si pasa esta validación.
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant N as nginx
+    participant F as FastAPI
+    participant KC as Keycloak
+
+    C->>N: Request a cualquier endpoint S1-S5<br/>Authorization: Bearer &lt;access_token&gt;<br/>HTTPS :443
+    N->>F: Request<br/>HTTP :8000
+
+    Note over F: OAuth2PasswordBearer extrae el token<br/>del header Authorization
+
+    alt Header ausente o sin forma "Bearer &lt;token&gt;"
+        F-->>N: 401 No autenticado
+        N-->>C: 401
+    else Header presente
+        Note over F: ¿La clave pública (JWKS) está<br/>cacheada y vigente? (lifespan: 1h)
+
+        alt Caché vencido o vacío
+            F->>KC: GET /realms/soa-realm/protocol/openid-connect/certs
+            KC-->>F: 200 {"keys": [...]}
+            Note over F: Guarda las claves en memoria<br/>por 1 hora
+        else Caché vigente
+            Note over F: Usa la clave ya cacheada — sin red
+        end
+
+        Note over F: jwt.decode(token, public_key,<br/>algorithms=["RS256"], issuer=...,<br/>options={"verify_aud": False})<br/>Verifica firma + exp + iss
+
+        alt Firma inválida, expirado o issuer incorrecto
+            F-->>N: 401 Token inválido o expirado
+            N-->>C: 401
+        else Válido
+            Note over F: Verifica claims["azp"] == "soa-client"
+
+            alt azp no coincide
+                F-->>N: 401 Token no emitido para este client
+                N-->>C: 401
+            else Coincide
+                Note over F: current_user = claims<br/>(sub, email, realm_access.roles, ...)<br/>Continúa con el endpoint solicitado<br/>(S1, S2, S3, S4 o S5 — ver diagrama<br/>correspondiente más arriba)
+                F-->>N: Respuesta normal del endpoint
+                N-->>C: Respuesta normal
+            end
+        end
+    end
+```
+
+---
 

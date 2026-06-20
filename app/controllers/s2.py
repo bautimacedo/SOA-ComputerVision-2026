@@ -10,8 +10,9 @@ import app.business.s2
 import app.repositories.frame_repository
 import app.repositories.file_repository
 import app.repositories.detection_repository
+import app.security
 
-router = APIRouter(prefix="/detections", tags=["S2 - Detección"])
+router = APIRouter(prefix="/detections", tags=["S2 - Detección"], dependencies=[Depends(app.security.get_current_user)])
 
 # Responde a POST /detections
 @router.post(

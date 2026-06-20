@@ -231,4 +231,114 @@ flowchart TD
 
 ---
 
+## Auth.1 — POST /auth/register
+
+```mermaid
+flowchart TD
+    A([Cliente]) --> B[POST /auth/register\nnombre + apellido + email + password]
+
+    B --> C[Consulta BD local\n¿existe persona con ese email?]
+    C -- Existe --> E1[409\nYa existe una persona con ese email]
+
+    C -- No existe --> D[Client Credentials Grant\nPOST a Keycloak /token\ngrant_type=client_credentials]
+    D -- ConnectionError --> E2[503\nKeycloak unreachable]
+
+    D -- OK --> F[Obtiene service_token\nrepresenta a la app, no a un usuario]
+
+    F --> G[POST a Keycloak Admin API\n/admin/realms/soa-realm/users\nAuthorization: Bearer service_token]
+    G -- ConnectionError --> E2
+    G -- 409 --> E3[409\nYa existe un usuario\ncon ese email en Keycloak]
+
+    G -- 201 Created --> H[Extrae UUID del header\nLocation de la respuesta\n→ keycloak_id]
+
+    H --> I[INSERT INTO persons\nnombre + apellido + email + keycloak_id]
+
+    I -- Exception --> J[Rollback BD local]
+    J --> K[Compensación:\nDELETE usuario en Keycloak\nAdmin API]
+    K --> E4[Excepción propagada\n500]
+
+    I -- OK --> L[COMMIT]
+    L --> M[201\nPersonResponse\npersonId + nombre + apellido + email]
+```
+
+---
+
+## Auth.2 — POST /auth/login
+
+```mermaid
+flowchart TD
+    A([Cliente]) --> B[POST /auth/login\nemail + password]
+
+    B --> C[Direct Access Grant\nPOST a Keycloak /token\ngrant_type=password]
+
+    C -- ConnectionError --> E1[503\nKeycloak unreachable]
+    C -- 400/401\ninvalid_grant --> E2[401\nCredenciales inválidas]
+
+    C -- 200 OK --> D[Recibe access_token\n+ refresh_token + expires_in]
+
+    D --> E[Decodifica access_token\nsin verificar firma\nsolo para leer claim sub]
+
+    E --> F[Consulta BD local\nWHERE keycloak_id = sub]
+    F -- Encontrada --> G1[person = registro encontrado]
+    F -- No encontrada --> G2[person = null]
+
+    G1 --> H[200\nLoginResponse\naccess_token + refresh_token\n+ expires_in + person]
+    G2 --> H
+```
+
+---
+
+## Auth.3 — POST /auth/refresh
+
+```mermaid
+flowchart TD
+    A([Cliente]) --> B[POST /auth/refresh\nrefresh_token]
+
+    B --> C[POST a Keycloak /token\ngrant_type=refresh_token]
+
+    C -- ConnectionError --> E1[503\nKeycloak unreachable]
+    C -- 400/401\nrefresh inválido/expirado --> E2[401\nRefresh token inválido o expirado]
+
+    C -- 200 OK --> D[200\nRefreshResponse\naccess_token + refresh_token\n+ expires_in nuevos]
+```
+
+---
+
+## Validación de JWT en un endpoint protegido (aplica a S1, S2, S3, S4 y S5)
+
+Este flujo se ejecuta **antes** de cualquiera de los diagramas de S1 a S5 — es la dependency `get_current_user`, activada vía `dependencies=[Depends(...)]` a nivel de cada router. Solo si pasa entero, la request continúa con el flujo específico del endpoint.
+
+```mermaid
+flowchart TD
+    A([Cliente]) --> B[Request a S1, S2, S3, S4 o S5\nAuthorization: Bearer access_token]
+
+    B --> C{¿Header Authorization\npresente y con forma\nBearer token?}
+    C -- No --> E1[401\nNo autenticado]
+
+    C -- Sí --> D{¿Clave pública JWKS\ncacheada y vigente?\nlifespan 1h}
+
+    D -- No / vencida --> D1[GET a Keycloak\n/realms/soa-realm/...../certs]
+    D1 --> D2[Guarda claves en caché\npor 1 hora]
+    D2 --> F
+
+    D -- Sí --> F[Usa la clave cacheada\nsin red]
+
+    F --> G[Verifica firma RS256\ndel JWT con la public key]
+    G -- Firma inválida --> E2[401\nToken inválido o expirado]
+
+    G -- OK --> H{¿exp no expiró?}
+    H -- Expiró --> E2
+
+    H -- Vigente --> I{¿iss coincide con\nhttp://keycloak/realms/soa-realm?}
+    I -- No coincide --> E2
+
+    I -- Sí --> J{¿azp coincide\ncon soa-client?}
+    J -- No coincide --> E3[401\nToken no emitido para este client]
+
+    J -- Sí --> K[current_user = claims\nsub + email + realm_access.roles]
+
+    K --> L[Continúa con el endpoint solicitado\nS1, S2, S3, S4 o S5]
+```
+
+---
 
