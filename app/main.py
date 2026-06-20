@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+import app.controllers.auth
 import app.controllers.s1
 import app.controllers.s2
 import app.controllers.s3
@@ -9,6 +10,7 @@ import app.database
 import app.entities
 
 # Guardamos las referencias antes de que 'app' se rebindee a la instancia FastAPI
+auth_router      = app.controllers.auth.router
 s1_router        = app.controllers.s1.router
 s2_router        = app.controllers.s2.router
 s3_router        = app.controllers.s3.router
@@ -66,6 +68,10 @@ tags_metadata = [
         "name": "S5 - Personas y Reconocimiento Facial",
         "description": "Registro de personas, generación de embeddings faciales e identificación por similitud vectorial.",
     },
+    {
+        "name": "Auth - Login y Registro",
+        "description": "Registro y login de usuarios delegado en Keycloak (Direct Access Grant), con formulario propio.",
+    },
 ]
 
 # A partir de acá 'app' deja de referenciar el paquete y pasa a ser la instancia FastAPI
@@ -77,6 +83,7 @@ app = FastAPI(
     contact={"name": "Repositorio", "url": "https://github.com/bautimacedo/SOA-ComputerVision-2026"},
 )
 
+app.include_router(auth_router)
 app.include_router(s1_router)
 app.include_router(s2_router)
 app.include_router(s4_router)  # /frames/search — debe ir antes que /{frame_id}

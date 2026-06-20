@@ -12,3 +12,4 @@ requests==2.32.3
 insightface==0.7.3
 onnxruntime==1.19.2
 numpy==1.26.4
+pyjwt[crypto]==2.9.0

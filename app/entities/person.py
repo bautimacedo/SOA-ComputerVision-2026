@@ -12,4 +12,5 @@ class Person(app.database.Base):
     apellido = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False)
     extra = Column(JSONB, nullable=True)
+    keycloak_id = Column(UUID(as_uuid=True), unique=True, nullable=True)
     created_at = Column(DateTime, server_default=func.now())

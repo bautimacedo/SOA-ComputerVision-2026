@@ -15,8 +15,18 @@ class PersonRepository:
     def get_by_email(self, email: str) -> app.entities.person.Person | None:
         return self.db.query(app.entities.person.Person).filter(app.entities.person.Person.email == email).first()
 
-    def create(self, nombre: str, apellido: str, email: str, extra: dict[str, Any] | None) -> app.entities.person.Person:
-        person = app.entities.person.Person(nombre=nombre, apellido=apellido, email=email, extra=extra)
+    def get_by_keycloak_id(self, keycloak_id: str) -> app.entities.person.Person | None:
+        return self.db.query(app.entities.person.Person).filter(app.entities.person.Person.keycloak_id == keycloak_id).first()
+
+    def create(
+        self,
+        nombre: str,
+        apellido: str,
+        email: str,
+        extra: dict[str, Any] | None,
+        keycloak_id: UUID | None = None,
+    ) -> app.entities.person.Person:
+        person = app.entities.person.Person(nombre=nombre, apellido=apellido, email=email, extra=extra, keycloak_id=keycloak_id)
         self.db.add(person)
         self.db.commit()
         self.db.refresh(person)
