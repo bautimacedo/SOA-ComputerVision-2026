@@ -34,7 +34,7 @@ En esta primera etapa no existe interfaz gráfica. Toda la interacción se reali
 ### Fase 2 — Implementado
 
 - Autenticación y autorización con Keycloak (OAuth2 / JWT)
-- Monitoreo con Telegraf + Grafana + InfluxDB
+- Monitoreo con Telegraf + Grafana + InfluxDB (VM y PC local, con Telegraf separado en cada uno)
 
 ---
 
@@ -161,6 +161,35 @@ Finalmente, en el `.env` del servidor poner la IP Tailscale de la PC local ==> T
 ```
 INFERENCE_SERVICE_URL=http://100.x.x.x:8001
 ```
+
+### PC local — monitoreo (Telegraf)
+
+Además del Telegraf que corre en la VM (monitorea la VM), la PC local corre su **propio** Telegraf, recolectando CPU y memoria de la PC y mandándolos al mismo InfluxDB de la VM, etiquetados con `host=bruno-pc` para poder separarlos en Grafana de las métricas de la VM.
+
+Corre **en Docker**, igual que el resto del sistema — no se instala nada directo en el sistema operativo (más allá de Tailscale, que ya está instalado para el `inference_service`):
+
+```bash
+cd inference_service
+docker compose up -d
+```
+
+Esto levanta un único contenedor (`bruno_telegraf`, imagen oficial `telegraf:1.32`) con `/proc`, `/sys` y `/` montados de solo lectura (`HOST_PROC`, `HOST_SYS`, `HOST_MOUNT_PREFIX`) para que reporte las métricas reales del **host**, no las del propio contenedor — sin estos mounts, Telegraf reportaría los recursos del contenedor en sí, no de toda la PC.
+
+La configuración vive en `inference_service/telegraf/telegraf.conf`. El dato importante a actualizar según el entorno es la URL de InfluxDB en `[[outputs.influxdb_v2]]`:
+
+- **Pruebas locales** (estado actual, todavía sin desplegar a la VM): `http://host.docker.internal:8086` — resuelve al propio host donde corre el `docker-compose.yml` principal, que en esta etapa simula a la VM.
+- **Producción** (cuando se despliegue): cambiar por la IP de Tailscale real de la VM, ej. `http://100.112.249.84:8086`. Requiere que la PC tenga Tailscale conectado (ya lo tiene, por el `inference_service`).
+
+Para que cualquiera de los dos casos funcione, InfluxDB necesita tener su puerto publicado al host — `docker-compose.yml` ya incluye `ports: ["8086:8086"]` en el servicio `influxdb` justamente por esto.
+
+**Verificación:**
+
+```bash
+curl http://localhost:8086/health      # InfluxDB respondiendo
+docker logs bruno_telegraf --tail 20   # debe mostrar "Tags enabled: host=bruno-pc" y sin errores
+```
+
+En Grafana, agregando `|> filter(fn: (r) => r.host == "bruno-pc")` a una query Flux de CPU/memoria se ve únicamente la PC local, separado de las métricas de la VM.
 
 ---
 

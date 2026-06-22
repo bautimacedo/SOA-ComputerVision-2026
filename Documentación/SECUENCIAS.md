@@ -533,3 +533,39 @@ sequenceDiagram
 
 ---
 
+## Monitoreo — Métricas de la PC local (Telegraf en Docker)
+
+Telegraf de la PC local (`bruno_telegraf`, container aparte en `inference_service/docker-compose.yml`) — independiente del Telegraf de la VM, pero escribe al mismo InfluxDB, distinguido por el tag `host=bruno-pc`.
+
+```mermaid
+sequenceDiagram
+    participant TB as Telegraf (bruno-pc)
+    participant IDB as InfluxDB
+    participant G as Grafana
+
+    loop Cada 10s (interval)
+        Note over TB: Lee /host/proc, /host/sys, /hostfs<br/>(mounts de solo lectura del host real,<br/>no del propio container)
+        Note over TB: inputs.cpu → usage_user, usage_system,<br/>usage_idle, etc.<br/>inputs.mem → used_percent
+        Note over TB: Tag agregado a cada métrica: host=bruno-pc
+    end
+
+    loop Cada 10s (flush_interval)
+        TB->>IDB: POST /api/v2/write?org=soa&bucket=metrics<br/>Authorization: Token soa-token-2026<br/>line protocol: cpu,host=bruno-pc usage_user=...<br/>mem,host=bruno-pc used_percent=...
+
+        alt InfluxDB inalcanzable
+            IDB-->>TB: ConnectionError
+            Note over TB: Reintenta en el próximo flush —<br/>no bloquea ni rompe el agente
+        else OK
+            IDB-->>TB: 204 No Content
+        end
+    end
+
+    Note over G: Usuario abre un panel de CPU/memoria
+    G->>IDB: Query Flux<br/>from(bucket:"metrics")<br/>|> filter(fn:(r)=> r.host=="bruno-pc")
+    IDB-->>G: Series de tiempo de bruno-pc<br/>(separadas de las de la VM)
+```
+
+**URL de InfluxDB en `[[outputs.influxdb_v2]]`**: en pruebas locales (estado actual) es `http://host.docker.internal:8086` — el host de desarrollo simula a la VM. Al desplegar de verdad, se reemplaza por la IP de Tailscale real de la VM (ej. `http://100.112.249.84:8086`).
+
+---
+

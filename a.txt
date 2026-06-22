@@ -1,0 +1,209 @@
+Informe completo — Monitoreo con Telegraf + InfluxDB + Grafana
+1. Arquitectura general del monitoreo
+El stack de observabilidad sigue este flujo:
+
+
+FUENTES DE MÉTRICAS                RECOLECTA          GUARDA          VISUALIZA
+─────────────────────             ──────────         ────────        ──────────
+CPU/memoria de la VM        ┐
+Contenedores Docker VM      ├──►  Telegraf (VM)  ──►  InfluxDB  ──►  Grafana
+FastAPI (inferencia, etc.)  ┘                         (VM)           (VM)
+                                                         ▲
+CPU/memoria PC de Bruno     ───►  Telegraf (Bruno) ──────┘
+                                  [FALTA INSTALAR]
+Punto clave: hay dos Telegraf separados. Uno corre en la VM y monitorea la VM. El otro tiene que correr en la PC de Bruno y monitorea la PC de Bruno. Los dos escriben al mismo InfluxDB (el de la VM), pero cada uno etiqueta sus datos con un host distinto, así en Grafana se pueden separar.
+
+2. Qué corre en la VM (ya está hecho y funcionando)
+Tres contenedores nuevos en el docker-compose.yml:
+
+InfluxDB (base de datos de series de tiempo)
+Imagen: influxdb:2.7
+Contenedor: soa_influxdb
+Puerto 8086 expuesto al host (ports: - "8086:8086") — esto es lo que permite que Bruno mande datos desde su PC por Tailscale.
+Credenciales de inicialización:
+Usuario: admin
+Password: soa2026admin
+Organización: soa
+Bucket: metrics
+Token: soa-token-2026 (este es el que usan Telegraf y Grafana para autenticarse)
+Telegraf (recolector — VM)
+Imagen: telegraf:1.32
+Contenedor: soa_telegraf
+Monta el socket de Docker (/var/run/docker.sock) para poder leer métricas de contenedores.
+Su config está en telegraf/telegraf.conf (ver sección 3).
+Grafana (visualización)
+Imagen: grafana/grafana:11.0.0
+Contenedor: soa_grafana
+Accesible en: https://soagmr.mooo.com/grafana/
+Login: usuario admin, password soa2026
+Variables de entorno importantes:
+GF_SERVER_ROOT_URL: https://soagmr.mooo.com/grafana/
+GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+GF_SERVER_PROTOCOL: http
+3. El telegraf.conf de la VM (¿se saca o no?)
+No se saca. Queda como está. Este archivo monitorea la VM. Contenido:
+
+
+[agent]
+  interval = "10s"
+  flush_interval = "10s"
+
+[[outputs.influxdb_v2]]
+  urls = ["http://influxdb:8086"]      # acá usa el nombre del contenedor, red interna de Docker
+  token = "soa-token-2026"
+  organization = "soa"
+  bucket = "metrics"
+
+[[inputs.cpu]]
+  percpu = false
+  totalcpu = true
+
+[[inputs.mem]]
+
+[[inputs.docker]]
+  endpoint = "unix:///var/run/docker.sock"
+  gather_services = false
+  container_name_include = ["soa_app", "soa_db", "soa_nginx"]
+
+[[inputs.http_listener_v2]]
+  service_address = ":8186"            # escucha métricas custom de FastAPI
+  paths = ["/telegraf"]
+  data_format = "influx"
+Diferencia clave con el de Bruno: el de la VM apunta a http://influxdb:8086 (nombre de contenedor, red Docker interna). El de Bruno va a apuntar a http://100.112.249.84:8086 (IP de Tailscale de la VM), porque Bruno está fuera de la red Docker.
+
+4. Instrumentación del código FastAPI (ya está hecho)
+Middleware global — app/middleware/metrics.py
+Intercepta todas las requests HTTP y manda a Telegraf:
+
+endpoint, method, status, duration_ms, error (0 o 1)
+Se manda a http://telegraf:8186/telegraf por HTTP, con timeout de 1s y envuelto en try/except para que si Telegraf está caído no rompa la app.
+Measurement: http_requests
+S2 — tiempo de inferencia (app/business/s2.py)
+Mide cuánto tarda YOLO y manda:
+
+Measurement inference: duration_ms, success (0/1), object_count, tag model
+S5 — embeddings y reconocimiento (app/controllers/s5.py)
+Measurement embeddings: duration_ms, processed, valid, rejected
+Measurement recognition: comparison_ms, success (0/1), confidence
+5. Configuración de Grafana que se hizo a mano
+Estas cosas se configuraron desde la web y quedan guardadas en el volumen grafanadata:
+
+Datasource InfluxDB conectado con:
+
+Query language: Flux
+URL: http://influxdb:8086
+Organization: soa, Token: soa-token-2026, Default Bucket: metrics
+Estado: "datasource is working. 3 buckets found"
+Dashboard con 7 paneles (queries en sección 8).
+
+Fix del proxy nginx (sección 6).
+
+6. Los dos fixes de nginx/Grafana que costaron (importante para Bruno)
+Grafana detrás de nginx en un subpath dio dos problemas que ya están resueltos, pero conviene que queden documentados:
+
+Problema 1 — Not Found: nginx no tenía el bloque de Grafana. Se agregó en nginx/nginx.conf:
+
+
+location /grafana/ {
+    proxy_pass http://grafana:3000/grafana/;   # OJO: termina en /grafana/, no solo en /
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto https;
+}
+Problema 2 — ERR_TOO_MANY_REDIRECTS: Grafana entraba en loop de redirect. Se resolvió con GF_SERVER_PROTOCOL: http + GF_SERVER_SERVE_FROM_SUB_PATH: "true" en el compose, y con el proxy_pass terminando en /grafana/.
+
+7. Lo que FALTA — tareas pendientes
+A) Bruno instala Telegraf en su PC (para CPU/memoria de su máquina)
+1. Instalar Telegraf
+
+Windows: descargar de https://www.influxdata.com/downloads/
+Linux:
+
+wget https://dl.influxdata.com/telegraf/releases/telegraf_1.32.3_amd64.deb
+sudo dpkg -i telegraf_1.32.3_amd64.deb
+2. Crear telegraf.conf en su PC (NO el de la VM, uno nuevo):
+
+
+[agent]
+  interval = "10s"
+  flush_interval = "10s"
+  hostname = "bruno-pc"
+
+[[outputs.influxdb_v2]]
+  urls = ["http://100.112.249.84:8086"]    # IP de Tailscale de la VM
+  token = "soa-token-2026"
+  organization = "soa"
+  bucket = "metrics"
+
+[[inputs.cpu]]
+  percpu = false
+  totalcpu = true
+
+[[inputs.mem]]
+3. Correr Telegraf
+
+
+telegraf --config telegraf.conf
+4. Requisito: Bruno tiene que tener Tailscale conectado para alcanzar la IP 100.112.249.84. (Ya lo tiene, porque es lo que usa para el inference service).
+
+5. Verificación: En Grafana, en un panel de CPU, agregar a la query |> filter(fn: (r) => r.host == "bruno-pc"). Si aparecen datos, funcionó.
+
+B) Métricas de inferencia (automático, no requiere config)
+Las métricas de tiempo de inferencia, embeddings y reconocimiento aparecen solas cuando se usan los endpoints S2 y S5, con Bruno corriendo el inference service. No hay nada que configurar, solo usar el sistema.
+
+C) Agregar paneles separados para Bruno en Grafana (opcional)
+Una vez que lleguen datos de bruno-pc, se pueden duplicar los paneles de CPU/memoria filtrando por host == "bruno-pc" para verlos separados de la VM.
+
+8. Queries Flux de los 7 paneles (referencia)
+
+# Tiempo promedio de inferencia
+from(bucket:"metrics") |> range(start:v.timeRangeStart, stop:v.timeRangeStop)
+  |> filter(fn:(r)=> r._measurement=="inference" and r._field=="duration_ms")
+  |> aggregateWindow(every:v.windowPeriod, fn:mean, createEmpty:false)
+
+# Imágenes procesadas por minuto
+from(bucket:"metrics") |> range(start:v.timeRangeStart, stop:v.timeRangeStop)
+  |> filter(fn:(r)=> r._measurement=="http_requests" and r._field=="duration_ms")
+  |> aggregateWindow(every:1m, fn:count, createEmpty:false)
+
+# Reconocimientos exitosos vs fallidos
+from(bucket:"metrics") |> range(start:v.timeRangeStart, stop:v.timeRangeStop)
+  |> filter(fn:(r)=> r._measurement=="recognition" and r._field=="success")
+  |> aggregateWindow(every:v.windowPeriod, fn:sum, createEmpty:false)
+
+# Tiempo de comparación vectorial
+from(bucket:"metrics") |> range(start:v.timeRangeStart, stop:v.timeRangeStop)
+  |> filter(fn:(r)=> r._measurement=="recognition" and r._field=="comparison_ms")
+  |> aggregateWindow(every:v.windowPeriod, fn:mean, createEmpty:false)
+
+# Uso de CPU
+from(bucket:"metrics") |> range(start:v.timeRangeStart, stop:v.timeRangeStop)
+  |> filter(fn:(r)=> r._measurement=="cpu" and r._field=="usage_percent")
+  |> aggregateWindow(every:v.windowPeriod, fn:mean, createEmpty:false)
+
+# Uso de memoria
+from(bucket:"metrics") |> range(start:v.timeRangeStart, stop:v.timeRangeStop)
+  |> filter(fn:(r)=> r._measurement=="mem" and r._field=="used_percent")
+  |> aggregateWindow(every:v.windowPeriod, fn:mean, createEmpty:false)
+
+# Tasa de errores
+from(bucket:"metrics") |> range(start:v.timeRangeStart, stop:v.timeRangeStop)
+  |> filter(fn:(r)=> r._measurement=="http_requests" and r._field=="error")
+  |> aggregateWindow(every:v.windowPeriod, fn:sum, createEmpty:false)
+9. Tabla de referencia rápida (credenciales, IPs, puertos)
+Qué	Valor
+IP Tailscale de la VM	100.112.249.84
+IP Tailscale PC Bruno (inference)	100.99.180.117:8001
+InfluxDB puerto	8086
+InfluxDB token	soa-token-2026
+InfluxDB org / bucket	soa / metrics
+InfluxDB admin	admin / soa2026admin
+Grafana URL	https://soagmr.mooo.com/grafana/
+Grafana login	admin / soa2026
+Telegraf VM escucha custom	puerto 8186, path /telegraf
+Measurements	http_requests, inference, embeddings, recognition, cpu, mem, docker
+10. Comandos de verificación (en la VM)
+
+docker ps | grep -E "influx|telegraf|grafana"   # los 3 corriendo
+docker logs soa_telegraf --tail 20              # ver que cargó cpu, mem, docker, http_listener_v2
+tailscale ip                                    # confirmar 100.112.249.84

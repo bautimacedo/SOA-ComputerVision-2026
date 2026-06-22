@@ -347,3 +347,28 @@ flowchart TD
 
 ---
 
+## Monitoreo — Métricas de la PC local (Telegraf en Docker)
+
+Corre como un container aparte (`inference_service/docker-compose.yml`), independiente del Telegraf de la VM. Manda CPU y memoria de la PC al mismo InfluxDB que usa la VM, etiquetadas con `host=bruno-pc`.
+
+```mermaid
+flowchart TD
+    A([Telegraf bruno-pc\nen Docker]) --> B[Lee /proc, /sys, /\nmontados de solo lectura desde el host\ncada interval = 10s]
+
+    B --> C[inputs.cpu\nusage_user/system/idle/etc]
+    B --> D[inputs.mem\nused_percent]
+
+    C --> E[Tag agregado:\nhost = bruno-pc]
+    D --> E
+
+    E --> F[POST a InfluxDB\nflush_interval = 10s]
+    F -- ConnectionError\nInfluxDB inalcanzable --> G[Reintenta en el\nsiguiente flush\nno rompe el agente]
+
+    F -- OK --> H[InfluxDB guarda\nbucket metrics\nmeasurement cpu / mem]
+    H --> I[Grafana consulta con Flux\nfiltrando host == bruno-pc\npara separar de la VM]
+```
+
+**Nota sobre la URL de InfluxDB**: en esta etapa (pruebas locales, todavía sin desplegar) usa `http://host.docker.internal:8086` — el propio host simula a la VM. Cuando se despliegue de verdad, se cambia por la IP de Tailscale real de la VM.
+
+---
+
