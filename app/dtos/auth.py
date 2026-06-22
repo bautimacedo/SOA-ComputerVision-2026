@@ -1,4 +1,5 @@
 from pydantic import BaseModel, EmailStr, ConfigDict
+from typing import Any
 
 import app.dtos.person
 
@@ -9,7 +10,8 @@ class RegisterRequest(BaseModel):
             "nombre": "Juan",
             "apellido": "Pérez",
             "email": "juan@mail.com",
-            "password": "Secreto123!"
+            "password": "Secreto123!",
+            "extra": {"legajo": "12345", "sector": "seguridad"}
         }
     })
 
@@ -17,6 +19,7 @@ class RegisterRequest(BaseModel):
     apellido: str
     email: EmailStr
     password: str
+    extra: dict[str, Any] | None = None
 
 
 class LoginRequest(BaseModel):

@@ -135,16 +135,23 @@ sequenceDiagram
         DB-->>F: path = "frames/{frameId}.jpg"
 
         F->>S3: GET frames/{frameId}.jpg<br/>Bucket: soa-frames-tp
-        S3-->>F: 200 OK<br/>Body: bytes JPEG completos
 
-        alt thumbnail=true
-            Note over F: Pillow abre la imagen en memoria<br/>img.thumbnail((320, 320))<br/>Reencoda a JPEG
-            F-->>N: 200 OK<br/>Content-Type: image/jpeg<br/>Content-Length: N bytes reducidos<br/>Body: JPEG reducido (máx 320×320)
-        else thumbnail=false o ausente
-            F-->>N: 200 OK<br/>Content-Type: image/jpeg<br/>Content-Length: N bytes originales<br/>Body: JPEG original completo
+        alt NoSuchKey — no existe en el bucket
+            S3-->>F: ClientError NoSuchKey
+            F-->>N: 404 Imagen no encontrada en S3
+            N-->>C: 404
+        else OK
+            S3-->>F: 200 OK<br/>Body: bytes JPEG completos
+
+            alt thumbnail=true
+                Note over F: Pillow abre la imagen en memoria<br/>img.thumbnail((320, 320))<br/>Reencoda a JPEG
+                F-->>N: 200 OK<br/>Content-Type: image/jpeg<br/>Content-Length: N bytes reducidos<br/>Body: JPEG reducido (máx 320×320)
+            else thumbnail=false o ausente
+                F-->>N: 200 OK<br/>Content-Type: image/jpeg<br/>Content-Length: N bytes originales<br/>Body: JPEG original completo
+            end
+
+            N-->>C: 200 OK<br/>Body: bytes JPEG
         end
-
-        N-->>C: 200 OK<br/>Body: bytes JPEG
     end
 ```
 
@@ -261,23 +268,30 @@ sequenceDiagram
     else Persona existe
         DB-->>F: 1 row
 
-        loop Para cada imagen en images
-            F->>IF: get_embedding_from_bytes(image_bytes)
-            Note over IF: Decodifica bytes → OpenCV<br/>Detecta rostros con RetinaFace<br/>Extrae embedding ArcFace (512 dims)
-            alt Error — 0 o más de 1 rostro / imagen inválida
-                IF-->>F: ValueError
-                Note over F: rejected_images++<br/>Continúa con la siguiente imagen
-            else OK
-                IF-->>F: embedding: [float x 512]
-                F->>DB: INSERT INTO embeddings<br/>(id, person_id, vector)<br/>vector = pgvector(512)
-                Note over F: valid_embeddings++
-            end
-        end
+        Note over F: Filtra archivos con filename vacío<br/>(Postman/navegador manda un part vacío<br/>cuando no se elige ningún archivo)
 
-        F->>DB: COMMIT
-        DB-->>F: OK
-        F-->>N: 200 OK<br/>{"personId":"uuid",<br/>"processedImages":3,<br/>"validEmbeddings":2,<br/>"rejectedImages":1}
-        N-->>C: 200 OK<br/>{personId, processedImages, validEmbeddings, rejectedImages}
+        alt No queda ninguna imagen válida tras el filtro
+            F-->>N: 400 Debe enviar al menos una imagen
+            N-->>C: 400
+        else Hay al menos una imagen
+            loop Para cada imagen en images
+                F->>IF: get_embedding_from_bytes(image_bytes)
+                Note over IF: Decodifica bytes → OpenCV<br/>Detecta rostros con RetinaFace<br/>Extrae embedding ArcFace (512 dims)
+                alt Error — 0 o más de 1 rostro / imagen inválida
+                    IF-->>F: ValueError
+                    Note over F: rejected_images++<br/>Continúa con la siguiente imagen
+                else OK
+                    IF-->>F: embedding: [float x 512]
+                    F->>DB: INSERT INTO embeddings<br/>(id, person_id, vector)<br/>vector = pgvector(512)
+                    Note over F: valid_embeddings++
+                end
+            end
+
+            F->>DB: COMMIT
+            DB-->>F: OK
+            F-->>N: 200 OK<br/>{"personId":"uuid",<br/>"processedImages":3,<br/>"validEmbeddings":2,<br/>"rejectedImages":1}
+            N-->>C: 200 OK<br/>{personId, processedImages, validEmbeddings, rejectedImages}
+        end
     end
 ```
 
@@ -339,7 +353,7 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant KC as Keycloak
 
-    C->>N: POST /auth/register<br/>{"nombre":"Juan","apellido":"Pérez",<br/>"email":"juan@mail.com","password":"Secreto123!"}<br/>HTTPS :443
+    C->>N: POST /auth/register<br/>{"nombre":"Juan","apellido":"Pérez",<br/>"email":"juan@mail.com","password":"Secreto123!",<br/>"extra":{"sector":"seguridad"}}<br/>HTTPS :443
     N->>F: POST /auth/register<br/>HTTP :8000
 
     F->>DB: SELECT * FROM persons<br/>WHERE email = 'juan@mail.com'
@@ -358,7 +372,9 @@ sequenceDiagram
 
         Note over F: service_token representa al<br/>service account soa-client,<br/>con el rol manage-users
 
-        F->>KC: POST /admin/realms/soa-realm/users<br/>Authorization: Bearer service_token<br/>{"username":"juan@mail.com","email":"juan@mail.com",<br/>"enabled":true,"emailVerified":true,<br/>"credentials":[{"type":"password","value":"Secreto123!","temporary":false}]}
+        Note over F: firstName/lastName son obligatorios —<br/>el realm exige perfil completo (VERIFY_PROFILE),<br/>sin ellos Keycloak rechazaría el login después<br/>con "Account is not fully set up"
+
+        F->>KC: POST /admin/realms/soa-realm/users<br/>Authorization: Bearer service_token<br/>{"username":"juan@mail.com","email":"juan@mail.com",<br/>"firstName":"Juan","lastName":"Pérez",<br/>"enabled":true,"emailVerified":true,<br/>"credentials":[{"type":"password","value":"Secreto123!","temporary":false}]}
 
         alt Usuario ya existe en Keycloak
             KC-->>F: 409 Conflict
@@ -368,7 +384,7 @@ sequenceDiagram
             KC-->>F: 201 Created<br/>Header Location: .../users/{keycloak_id}
             Note over F: Extrae el UUID del final<br/>de la URL en Location
 
-            F->>DB: INSERT INTO persons<br/>(id, nombre, apellido, email, keycloak_id, created_at)
+            F->>DB: INSERT INTO persons<br/>(id, nombre, apellido, email, extra, keycloak_id, created_at)
 
             alt Falla el INSERT o el COMMIT local
                 DB-->>F: Exception
@@ -380,7 +396,7 @@ sequenceDiagram
                 N-->>C: Error
             else OK
                 DB-->>F: COMMIT OK
-                F-->>N: 201 Created<br/>{"personId":"uuid","nombre":"Juan",<br/>"apellido":"Pérez","email":"juan@mail.com","extra":null}
+                F-->>N: 201 Created<br/>{"personId":"uuid","nombre":"Juan",<br/>"apellido":"Pérez","email":"juan@mail.com",<br/>"extra":{"sector":"seguridad"}}
                 N-->>C: 201 Created<br/>{personId, nombre, apellido, email, extra}
             end
         end

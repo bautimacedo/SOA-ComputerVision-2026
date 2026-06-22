@@ -1,6 +1,6 @@
-# Login con Keycloak — Diseño del flujo (pendiente de implementación)
+# Login con Keycloak — Flujo implementado
 
-Este documento describe **cómo va a funcionar** el login personalizado del sistema, usando Keycloak como backend de identidad pero con pantallas y endpoints propios (no la UI default de Keycloak). Es un documento de diseño: **nada de esto está implementado en código todavía** — primero se completó y validó la configuración de Keycloak (ver [`KEYCLOAK_CONFIGURACION.md`](KEYCLOAK_CONFIGURACION.md)).
+Este documento describe **cómo funciona** el login personalizado del sistema, usando Keycloak como backend de identidad pero con endpoints propios (no la UI default de Keycloak). **Ya está implementado, probado de punta a punta y funcionando** — ver [`PLAN_DE_PRUEBAS.md`](PLAN_DE_PRUEBAS.md) para el detalle de las pruebas, y [`KEYCLOAK_CONFIGURACION.md`](KEYCLOAK_CONFIGURACION.md) para la configuración de Keycloak en la que se apoya.
 
 Para entender los términos usados (realm, client, JWT, claims, grant types, etc.), ver [`KEYCLOAK_CURSO.md`](KEYCLOAK_CURSO.md). Este documento no vuelve a explicar esos conceptos, los da por leídos.
 
@@ -17,9 +17,9 @@ Se eligió **(A)**, porque el requerimiento explícito fue no usar la interfaz d
 
 ---
 
-## 2. Cambio necesario en la base de datos
+## 2. Cambio en la base de datos
 
-La tabla `persons` (entidad existente del sistema, usada hoy para el reconocimiento facial) necesita una columna nueva:
+La tabla `persons` (entidad existente del sistema, usada también para el reconocimiento facial) tiene una columna agregada:
 
 ```sql
 ALTER TABLE persons ADD COLUMN keycloak_id UUID UNIQUE;
@@ -33,9 +33,9 @@ ALTER TABLE persons ADD COLUMN keycloak_id UUID UNIQUE;
 
 ---
 
-## 3. Endpoints nuevos a construir
+## 3. Endpoints implementados
 
-Todos viven en el backend FastAPI (no en Keycloak):
+Todos viven en el backend FastAPI (no en Keycloak), en [`app/controllers/auth.py`](../app/controllers/auth.py):
 
 | Endpoint | Función |
 |---|---|
@@ -54,7 +54,7 @@ Además, una **dependency** reutilizable (no es un endpoint, es una función que
 
 ## 4. Flujo de registro — paso a paso
 
-Disparado por: `POST /auth/register` con body `{ nombre, apellido, email, password }`.
+Disparado por: `POST /auth/register` con body `{ nombre, apellido, email, password, extra? }` (`extra` es opcional, JSON libre — igual que en `S5.1`, va solo a `persons`, nunca a Keycloak).
 
 1. El usuario completa el formulario propio (frontend, fuera del alcance de este documento) y lo manda a nuestro backend.
 2. **Validación local primero**: el backend chequea contra la tabla `persons` si ya existe una persona con ese `email` (igual que hace hoy `S5.1 — Registrar persona`). Si existe, se corta ahí con `409 Conflict` — no tiene sentido llamar a Keycloak si ya sabemos que va a fallar por nuestro lado.
@@ -68,13 +68,16 @@ Disparado por: `POST /auth/register` con body `{ nombre, apellido, email, passwo
    ```
    POST /admin/realms/soa-realm/users
    Authorization: Bearer <token de servicio>
-   { "username": email, "email": email, "enabled": true,
+   { "username": email, "email": email, "firstName": nombre, "lastName": apellido,
+     "enabled": true, "emailVerified": true,
      "credentials": [{ "type": "password", "value": password, "temporary": false }] }
    ```
+   **`firstName`/`lastName` son obligatorios** — se descubrió en la práctica (no en el diseño original) que el realm tiene activado `VERIFY_PROFILE`, que exige perfil completo. Sin estos dos campos, el usuario se crea "a medias": el alta en Keycloak da `201` igual, pero el login posterior (`POST /auth/login`) falla con `invalid_grant` / `"Account is not fully set up"`, porque Keycloak detecta el perfil incompleto recién en el momento de loguearse. Ver `KEYCLOAK_CONFIGURACION.md` para el detalle de cómo se diagnosticó esto.
+
    Keycloak crea el usuario, le asigna automáticamente el rol `OPERATOR` (por el `default-roles-soa-realm` configurado), y devuelve en la respuesta (header `Location`) la URL del usuario creado, de la cual se extrae su `id` (el UUID que será el `keycloak_id`).
-5. **Crear el registro de negocio**: el backend hace `INSERT INTO persons (nombre, apellido, email, keycloak_id) VALUES (...)`, usando el UUID obtenido en el paso anterior.
-6. **Manejo de fallos (consideración de diseño, sin transacción distribuida real)**: si el paso 5 falla (ej. error de base de datos) después de que el paso 4 ya creó el usuario en Keycloak, queda un usuario "huérfano" en Keycloak sin contraparte en `persons`. Como los dos sistemas son independientes, no hay una transacción que abarque a ambos. La compensación a implementar: si falla el insert local, el backend debe llamar a `DELETE /admin/realms/soa-realm/users/{id}` para revertir la creación en Keycloak antes de devolver el error al cliente.
-7. Se devuelve `201 Created` con los datos de la persona registrada (sin incluir tokens — el registro no implica loguearse automáticamente, en este diseño el usuario debe luego loguearse por separado en el paso siguiente; esto se puede revisar si se prefiere loguear automáticamente tras registrar).
+5. **Crear el registro de negocio**: el backend hace `INSERT INTO persons (nombre, apellido, email, extra, keycloak_id) VALUES (...)`, usando el UUID obtenido en el paso anterior.
+6. **Manejo de fallos**: si el paso 5 falla (ej. error de base de datos) después de que el paso 4 ya creó el usuario en Keycloak, queda un usuario "huérfano" en Keycloak sin contraparte en `persons`. Como los dos sistemas son independientes, no hay una transacción que abarque a ambos. La compensación: si falla el insert local, el backend hace `db.rollback()` y llama a `DELETE /admin/realms/soa-realm/users/{id}` para revertir la creación en Keycloak antes de propagar el error.
+7. Se devuelve `201 Created` con los datos de la persona registrada (sin incluir tokens — el registro no implica loguearse automáticamente, hay que loguearse por separado con `POST /auth/login`).
 
 ---
 
@@ -99,7 +102,7 @@ Disparado por: `POST /auth/login` con body `{ email, password }`.
 
 ## 6. Flujo de una request a un endpoint protegido — paso a paso
 
-Ejemplo: el frontend llama a un endpoint cualquiera de nuestra API que requiere estar logueado (a definir cuáles — hoy ninguno lo exige, esto se agrega cuando se proteja cada endpoint con la dependency).
+Ejemplo: el frontend llama a un endpoint cualquiera de S1 a S5 — todos requieren estar logueado hoy (el único criterio aplicado es "¿hay un token válido?", sin distinguir por rol — ver la sección de pendientes más abajo).
 
 1. La request llega a FastAPI con header `Authorization: Bearer <access_token>`.
 2. El endpoint tiene como parámetro `current_user: dict = Depends(get_current_user)`. Antes de ejecutar el código del endpoint, FastAPI ejecuta esa dependency.
@@ -152,11 +155,20 @@ Frontend → Backend (Authorization: Bearer <access_token>)
 
 ---
 
-## 9. Qué falta para implementar esto
+## 9. Estado de la implementación
 
-- Agregar `keycloak_id` a la entidad `Person` (SQLAlchemy) y su migración.
-- Variables de entorno nuevas en `app/config.py`: URL de Keycloak, realm, client_id, client_secret.
-- Un módulo de cliente HTTP hacia Keycloak (análogo a como `app/business/s5.py` ya le habla al inference service) para encapsular las llamadas a `/token` y a la Admin API.
-- La dependency `get_current_user` y `require_role`, con caché del JWKS.
-- Los tres endpoints (`/auth/register`, `/auth/login`, `/auth/refresh`).
-- Decidir, endpoint por endpoint del sistema actual (S1 a S5), cuáles quedan públicos y cuáles requieren login y/o un rol específico.
+### Hecho
+
+- `keycloak_id` en la entidad `Person` (SQLAlchemy) + migración (`db/migrations/0001_add_keycloak_id_to_persons.sql`).
+- Variables de entorno en `app/config.py` / `.env`: `KEYCLOAK_URL`, `KEYCLOAK_PUBLIC_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET`.
+- Cliente HTTP hacia Keycloak: [`app/business/keycloak_service.py`](../app/business/keycloak_service.py) — `login()`, `refresh()`, `create_user()`, `delete_user()`.
+- La dependency `get_current_user` (con caché del JWKS) y `require_role`, en [`app/security.py`](../app/security.py).
+- Los tres endpoints, en [`app/controllers/auth.py`](../app/controllers/auth.py): `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`.
+- Todos los endpoints de S1 a S5 quedaron protegidos con `get_current_user` (`dependencies=[Depends(...)]` a nivel de cada `APIRouter`). `/auth/*` y `/health` quedaron públicos.
+- Probado de punta a punta: registro → login → request protegida, con datos reales — ver `PLAN_DE_PRUEBAS.md`.
+
+### Pendiente
+
+- **`require_role` no se usa en ningún endpoint todavía.** Hoy cualquier usuario autenticado (sea `ADMIN`, `OPERATOR` o `VIEWER`) puede llamar a cualquier endpoint protegido — solo se verifica *que haya* un token válido, no *qué rol* tiene. La matriz de permisos por rol está documentada en el README, pero falta aplicarla en código.
+- Endpoint propio para que un `ADMIN` cambie el rol de otro usuario (hoy es 100% manual desde la consola de Keycloak: `Users` → el usuario → `Role mapping`).
+- El login de Grafana vía Keycloak (Authorization Code Flow, restringido a `ADMIN` con `role_attribute_path` + `role_attribute_strict`) está implementado y configurado, pero no es parte de este flujo de auth de la API — es una integración aparte, documentada en `KEYCLOAK_CONFIGURACION.md`.

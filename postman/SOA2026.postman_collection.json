@@ -51,7 +51,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nombre\": \"Marti\",\n  \"apellido\": \"Test\",\n  \"email\": \"marti@test.com\",\n  \"password\": \"Secreto123!\"\n}"
+              "raw": "{\n  \"nombre\": \"Marti\",\n  \"apellido\": \"Test\",\n  \"email\": \"marti@test.com\",\n  \"password\": \"Secreto123!\",\n  \"extra\": {\"sector\": \"pruebas\"}\n}"
             },
             "url": { "raw": "{{baseUrl}}/auth/register", "host": ["{{baseUrl}}"], "path": ["auth", "register"] },
             "description": "Crea el usuario en Keycloak (con firstName/lastName) y en persons. Si el email ya existe, devuelve 409 — es esperado en corridas repetidas, no es un error real."

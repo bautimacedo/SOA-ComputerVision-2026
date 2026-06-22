@@ -86,8 +86,9 @@ flowchart TD
     D -- Existe --> E[Obtener path de S3\ndesde tabla files]
 
     E --> F[Descargar imagen de S3\nusando el path almacenado]
+    F -- NoSuchKey\nno existe en el bucket --> E3[404\nImagen no encontrada en S3]
 
-    F --> G{¿thumbnail=true?}
+    F -- OK --> G{¿thumbnail=true?}
 
     G -- Sí --> H[Redimensionar con Pillow\nmáx 320×320 px\nmanteniendo proporción]
     H --> I[200\nJPEG binario reducido\nContent-Type: image/jpeg]
@@ -194,7 +195,11 @@ flowchart TD
     C -- Sí --> D[Consulta BD\nWHERE id = person_id]
     D -- No existe --> E2[404\nPersona no encontrada]
 
-    D -- Existe --> E[Para cada imagen en images]
+    D -- Existe --> D1[Filtra archivos con\nfilename vacío\nningún archivo elegido]
+    D1 --> D2{¿Queda al menos\nuna imagen?}
+    D2 -- No --> E3[400\nDebe enviar al menos una imagen]
+
+    D2 -- Sí --> E[Para cada imagen en images]
 
     E --> F[InsightFace\nget_embedding_from_bytes]
     F -- Error\n0 o más de 1 rostro\nimagen inválida --> G[rejected_images ++\nContinúa con la siguiente]
@@ -235,7 +240,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A([Cliente]) --> B[POST /auth/register\nnombre + apellido + email + password]
+    A([Cliente]) --> B[POST /auth/register\nnombre + apellido + email + password + extra?]
 
     B --> C[Consulta BD local\n¿existe persona con ese email?]
     C -- Existe --> E1[409\nYa existe una persona con ese email]
@@ -245,20 +250,20 @@ flowchart TD
 
     D -- OK --> F[Obtiene service_token\nrepresenta a la app, no a un usuario]
 
-    F --> G[POST a Keycloak Admin API\n/admin/realms/soa-realm/users\nAuthorization: Bearer service_token]
+    F --> G[POST a Keycloak Admin API\n/admin/realms/soa-realm/users\nusername+email+firstName+lastName\n+ credentials password\nAuthorization: Bearer service_token]
     G -- ConnectionError --> E2
     G -- 409 --> E3[409\nYa existe un usuario\ncon ese email en Keycloak]
 
     G -- 201 Created --> H[Extrae UUID del header\nLocation de la respuesta\n→ keycloak_id]
 
-    H --> I[INSERT INTO persons\nnombre + apellido + email + keycloak_id]
+    H --> I[INSERT INTO persons\nnombre + apellido + email + extra + keycloak_id]
 
     I -- Exception --> J[Rollback BD local]
     J --> K[Compensación:\nDELETE usuario en Keycloak\nAdmin API]
     K --> E4[Excepción propagada\n500]
 
     I -- OK --> L[COMMIT]
-    L --> M[201\nPersonResponse\npersonId + nombre + apellido + email]
+    L --> M[201\nPersonResponse\npersonId + nombre + apellido + email + extra]
 ```
 
 ---

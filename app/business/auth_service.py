@@ -1,4 +1,5 @@
 import jwt
+from typing import Any
 from sqlalchemy.orm import Session
 
 import app.business.keycloak_service
@@ -7,7 +8,9 @@ import app.entities.person
 
 
 # Crea el usuario en Keycloak y, si falla el alta local, revierte la creación remota (compensación).
-def register(db: Session, nombre: str, apellido: str, email: str, password: str) -> app.entities.person.Person:
+def register(
+    db: Session, nombre: str, apellido: str, email: str, password: str, extra: dict[str, Any] | None = None
+) -> app.entities.person.Person:
     repo = app.repositories.person_repository.PersonRepository(db)
     if repo.get_by_email(email):
         raise ValueError("Ya existe una persona con ese email")
@@ -15,7 +18,7 @@ def register(db: Session, nombre: str, apellido: str, email: str, password: str)
     keycloak_id = app.business.keycloak_service.keycloak_service.create_user(email, password, nombre, apellido)
 
     try:
-        return repo.create(nombre, apellido, email, None, keycloak_id)
+        return repo.create(nombre, apellido, email, extra, keycloak_id)
     except Exception:
         db.rollback()
         app.business.keycloak_service.keycloak_service.delete_user(keycloak_id)

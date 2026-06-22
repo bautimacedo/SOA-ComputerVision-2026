@@ -77,6 +77,12 @@ async def generate_embeddings(
     if person is None:
         raise HTTPException(status_code=404, detail="Persona no encontrada")
 
+    # Postman/navegadores mandan un part vacío (filename="") cuando no se elige ningún archivo
+    # para el campo — sin este filtro, FastAPI lo recibe como 1 imagen "real" y la cuenta como rechazada.
+    images = [img for img in images if img.filename]
+    if not images:
+        raise HTTPException(status_code=400, detail="Debe enviar al menos una imagen")
+
     processed_images = 0
     valid_embeddings = 0
     rejected_images = 0

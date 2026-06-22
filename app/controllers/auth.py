@@ -23,7 +23,7 @@ router = APIRouter(prefix="/auth", tags=["Auth - Login y Registro"])
 )
 def register(body: app.dtos.auth.RegisterRequest, db: Session = Depends(app.database.get_db)):
     try:
-        return app.business.auth_service.register(db, body.nombre, body.apellido, body.email, body.password)
+        return app.business.auth_service.register(db, body.nombre, body.apellido, body.email, body.password, body.extra)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except RuntimeError as e:
