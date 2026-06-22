@@ -175,8 +175,20 @@ Esto confirma:
 
 ## 8. Pendientes antes de pasar a producción
 
-- Regenerar el `client secret` (quedó expuesto en el chat de esta sesión).
-- Cambiar `start-dev` por `start` en el servicio `keycloak` del compose, configurando `KC_HOSTNAME` y TLS reales.
-- Reemplazar las URLs de `localhost:8000` en el client por el dominio real una vez asignado.
-- Crear el `.env` real con contraseñas fuertes para `KEYCLOAK_DB_PASSWORD` y `KEYCLOAK_ADMIN_PASSWORD` (no usar los defaults de ejemplo).
-- Borrar o deshabilitar el usuario de prueba `marti` antes de ir a producción.
+- ~~Cambiar `start-dev` por `start`, configurando `KC_HOSTNAME` y TLS~~ — **resuelto parcialmente, ver sección 9**: se agregó TLS (vía nginx) y `KC_HOSTNAME`, pero se decidió mantener `start-dev` (no `start`) para no introducir riesgo adicional sin poder probarlo en la VPS antes de este despliegue.
+- ~~Reemplazar las URLs de `localhost:8000` en el client por el dominio real~~ — no aplica: como el realm se recrea desde cero en la VPS (ver sección 9), se configura directamente con el dominio real, sin pasar por `localhost`.
+- Crear el `.env` real con contraseñas fuertes para `KEYCLOAK_DB_PASSWORD` y `KEYCLOAK_ADMIN_PASSWORD` — **decisión tomada**: se mantienen los valores de ejemplo (`admin`/`admin`, etc.) para este despliegue, ya que es un trabajo práctico y no maneja datos sensibles reales. Pendiente para una eventual puesta en producción real.
+- Regenerar cualquier `client secret` que haya quedado expuesto en un chat — no aplica directamente porque el realm se recrea desde cero en la VPS con secrets nuevos, pero aplica el mismo cuidado a futuro.
+
+---
+
+## 9. Despliegue a la VPS — decisiones tomadas
+
+Decisiones tomadas al preparar el primer despliegue a la VPS (rama `main`, fast-forward desde `dev-bruno`):
+
+- **Dominio de Keycloak**: `auth.soagmr.mooo.com`, separado del dominio de la API (`soagmr.mooo.com`). Se eligió un subdominio con nginx + TLS en lugar de exponer Keycloak directo por el puerto `8080` sin cifrar — igual que se hizo para la API.
+- **Certificado**: se extiende el certificado existente de `soagmr.mooo.com` con `certbot --nginx -d soagmr.mooo.com -d auth.soagmr.mooo.com --expand` (un solo certificado cubre los dos dominios). Requiere que el registro DNS de `auth.soagmr.mooo.com` ya apunte a la IP de la VPS antes de correr el comando.
+- **`KC_HOSTNAME`**: se agregó al compose (`KEYCLOAK_HOSTNAME` en `.env`) para que Keycloak genere URLs/issuer correctos. Se mantuvo `KC_HOSTNAME_STRICT: "false"` (no estricto) por seguridad ante posibles desajustes, y se agregó `KC_PROXY_HEADERS: xforwarded` para que confíe en los headers `X-Forwarded-*` que manda nginx (necesario para que detecte que el tráfico real es HTTPS, aunque nginx le hable por HTTP puro dentro de la red interna).
+- **Puerto 8080 directo**: se mantiene publicado (no se cerró), para debug o acceso directo si hace falta. Recomendado, no aplicado todavía: restringirlo con `ufw` en la VPS para que solo responda desde `localhost`/Tailscale, ya que el acceso normal de ahora en más es vía `https://auth.soagmr.mooo.com`.
+- **Base de datos de la app** (`persons`, `frames`, etc.): se decidió recrear desde cero en la VPS — no hay datos previos que preservar ni migración manual que correr.
+- **Keycloak en la VPS**: al ser un servicio nuevo en `main` (no existía antes de este despliegue), el realm/client/roles se configuran desde cero ahí, igual que se hizo en local — no hay nada que migrar.

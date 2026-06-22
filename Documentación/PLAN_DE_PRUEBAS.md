@@ -1,6 +1,6 @@
 # Plan de pruebas manual — Sistema completo (local)
 
-Checklist para validar el sistema de punta a punta: auth/Keycloak, S1-S5, monitoreo y resiliencia. Pensado para correr con la colección de Postman [`postman/SOA2026.postman_collection.json`](../postman/SOA2026.postman_collection.json) + el environment [`SOA2026-local`](../postman/SOA2026-local.postman_environment.json).
+Checklist para validar el sistema de punta a punta: auth/Keycloak, S1-S5, monitoreo y resiliencia. Pensado para correr con la colección de Postman [`postman/SOA2026.postman_collection.json`](postman/SOA2026.postman_collection.json) + el environment [`SOA2026-local`](postman/SOA2026-local.postman_environment.json).
 
 ---
 

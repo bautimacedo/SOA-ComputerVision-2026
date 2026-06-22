@@ -4,8 +4,6 @@ services:
     container_name: soa_app
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "8000:8000"  # solo para pruebas locales sin nginx (Postman directo). En la VPS no hace falta, nginx hace proxy interno.
     volumes:
       - ./models:/app/models
       - insightface_cache:/root/.insightface  # evita re-descargar el modelo buffalo_l en cada rebuild/recreate
@@ -90,10 +88,15 @@ services:
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # En local (sin dominio): KC_HOSTNAME_DEFAULT queda en localhost por defecto.
+      # En la VPS: KC_HOSTNAME le dice a Keycloak el dominio público real, para que
+      # genere URLs/issuer con https:// correctamente detrás de nginx (ver X-Forwarded-* abajo).
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-localhost}
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
     ports:
-      - "8080:8080"
+      - "8080:8080"  # acceso directo (debug/local). En la VPS, considerar cerrarlo con ufw salvo desde Tailscale/localhost — el acceso normal es vía nginx en auth.soagmr.mooo.com
     depends_on:
       keycloak_db:
         condition: service_healthy
@@ -134,12 +137,11 @@ services:
     image: grafana/grafana:11.0.0
     container_name: soa_grafana
     restart: unless-stopped
-    ports:
-      - "3000:3000"  # solo para pruebas locales sin nginx. En la VPS no hace falta, nginx hace proxy en /grafana/.
     environment:
       GF_SECURITY_ADMIN_PASSWORD: soa2026
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-https://soagmr.mooo.com/grafana/}
       GF_SERVER_SERVE_FROM_SUB_PATH: ${GRAFANA_SERVE_FROM_SUB_PATH:-true}
+      GF_SERVER_PROTOCOL: http  # nginx termina el TLS; sin esto, Grafana entra en loop de redirect (ERR_TOO_MANY_REDIRECTS) detrás del proxy
       # Login vía Keycloak (Authorization Code Flow) — client "grafana-client"
       GF_AUTH_GENERIC_OAUTH_ENABLED: "true"
       GF_AUTH_GENERIC_OAUTH_NAME: Keycloak

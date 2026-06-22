@@ -93,7 +93,8 @@ cd SOA-ComputerVision-2026
 
 # 2. Configurar variables de entorno
 cp .env.example .env
-# Editar .env con las credenciales reales de AWS y la IP Tailscale de la PC local
+# Editar .env: credenciales de AWS, IP Tailscale de la PC local,
+# KEYCLOAK_HOSTNAME=auth.soagmr.mooo.com, KEYCLOAK_PUBLIC_URL=https://auth.soagmr.mooo.com
 
 # 3. Instalar Tailscale en el HOST del servidor (no dentro de Docker)
 curl -fsSL https://tailscale.com/install.sh | sh
@@ -101,15 +102,20 @@ tailscale up
 
 # 4. Crear el bucket S3 y configurar variables en .env
 
-# 5. Obtener certificado SSL (solo la primera vez)
-sudo apt install certbot
-sudo certbot certonly --standalone -d dominio
+# 5. DNS: antes de pedir el certificado, el subdominio auth.soagmr.mooo.com
+# tiene que apuntar a la misma IP que soagmr.mooo.com (agregar el registro A
+# correspondiente en el proveedor de DNS que estén usando)
 
-# 6. Levantar los contenedores
+# 6. Obtener/extender el certificado SSL para incluir el subdominio de Keycloak
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d soagmr.mooo.com -d auth.soagmr.mooo.com --expand
+
+# 7. Levantar los contenedores
 docker compose up -d
 
-# 7. Verificar que todo levantó
+# 8. Verificar que todo levantó
 curl https://soagmr.mooo.com/health
+curl https://auth.soagmr.mooo.com/realms/soa-realm
 ```
 
 Para actualizar el sistema después de cambios en el código:
