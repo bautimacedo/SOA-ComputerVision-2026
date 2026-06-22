@@ -8,3 +8,5 @@ inference_service/models/
 personal.txt
 embedding_payload.json
 recognition_payload.json
+node_modules/
+frontend/dist/
