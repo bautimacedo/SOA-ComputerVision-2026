@@ -1,3 +1,4 @@
+import time
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import List
@@ -9,6 +10,7 @@ import app.business.s5
 import app.repositories.person_repository
 import app.repositories.embedding_repository
 import app.security
+from app.middleware.metrics import _send
 
 persons_router = APIRouter(prefix="/persons", tags=["S5 - Personas y Reconocimiento Facial"], dependencies=[Depends(app.security.get_current_user)])
 recognition_router = APIRouter(prefix="/face-recognition", tags=["S5 - Personas y Reconocimiento Facial"], dependencies=[Depends(app.security.get_current_user)])
@@ -79,6 +81,7 @@ async def generate_embeddings(
     valid_embeddings = 0
     rejected_images = 0
 
+    start = time.time()
     for image_file in images:
         processed_images += 1
         try:
@@ -91,6 +94,8 @@ async def generate_embeddings(
             rejected_images += 1
 
     db.commit()
+    duration_ms = (time.time() - start) * 1000
+    _send(f"embeddings duration_ms={duration_ms:.2f},processed={processed_images}i,valid={valid_embeddings}i,rejected={rejected_images}i")
 
     return app.dtos.person.EmbeddingResponse(
         personId=person.id,
@@ -125,16 +130,21 @@ async def recognize_face(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    start = time.time()
     result = app.repositories.embedding_repository.EmbeddingRepository(db).find_nearest(vector) # para comparar los embeddings se usa esa función.
+    comparison_ms = (time.time() - start) * 1000
 
     if result is None:
+        _send(f"recognition comparison_ms={comparison_ms:.2f},success=0i")
         return app.dtos.person.RecognitionResponse(personId=None, nombre=None, apellido=None, confidence=0.0)
 
     confidence = 1.0 - float(result["distance"])
 
     if confidence < threshold:
+        _send(f"recognition comparison_ms={comparison_ms:.2f},success=0i,confidence={confidence:.4f}")
         return app.dtos.person.RecognitionResponse(personId=None, nombre=None, apellido=None, confidence=confidence)
 
+    _send(f"recognition comparison_ms={comparison_ms:.2f},success=1i,confidence={confidence:.4f}")
     return app.dtos.person.RecognitionResponse(
         personId=result["person_id"],
         nombre=result["nombre"],

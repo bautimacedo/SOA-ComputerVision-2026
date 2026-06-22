@@ -1,7 +1,9 @@
+import time
 import requests
 import boto3
 import app.config
 from botocore.exceptions import ClientError
+from app.middleware.metrics import _send
 
 _s3 = None
 
@@ -25,6 +27,7 @@ def _get_s3():
 #files= → campos binarios del multipart. El valor es una tupla (nombre_archivo, bytes, content_type)
 #data= → campos de texto del multipart (equivalente a Form)
 def run_inference(model_id: str, image_bytes: bytes) -> list[dict]:
+    start = time.time()
     try:
         response = requests.post(
             f"{app.config.settings.inference_service_url}/infer",
@@ -33,13 +36,19 @@ def run_inference(model_id: str, image_bytes: bytes) -> list[dict]:
             timeout=60,
         )
     except requests.exceptions.ConnectionError:
+        _send(f"inference,model={model_id} duration_ms=0,success=0i")
         raise RuntimeError("Inference service unreachable")
 
+    duration_ms = (time.time() - start) * 1000
+
     if response.status_code == 400:
+        _send(f"inference,model={model_id} duration_ms={duration_ms:.2f},success=0i")
         raise ValueError(response.json().get("detail", "Bad request"))
 
     response.raise_for_status()
-    return response.json()["objects"]
+    objects = response.json()["objects"]
+    _send(f"inference,model={model_id} duration_ms={duration_ms:.2f},success=1i,object_count={len(objects)}i")
+    return objects
 
 #S3 no tiene carpetas reales — frames/uuid.jpg es simplemente un string que actúa como path.
 # put_object es un HTTP PUT al API de AWS S3. Si falla, boto3 lanza ClientError, que nosotros

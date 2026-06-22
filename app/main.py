@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from app.middleware.metrics import MetricsMiddleware
 
 import app.controllers.auth
 import app.controllers.s1
@@ -82,6 +83,8 @@ app = FastAPI(
     openapi_tags=tags_metadata,
     contact={"name": "Repositorio", "url": "https://github.com/bautimacedo/SOA-ComputerVision-2026"},
 )
+
+app.add_middleware(MetricsMiddleware)
 
 app.include_router(auth_router)
 app.include_router(s1_router)
