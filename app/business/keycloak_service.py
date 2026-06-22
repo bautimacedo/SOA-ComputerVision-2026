@@ -67,7 +67,9 @@ class KeycloakService:
         return response.json()["access_token"]
 
     # Crea el usuario en Keycloak vía Admin REST API y devuelve su UUID (keycloak_id).
-    def create_user(self, email: str, password: str) -> str:
+    # firstName/lastName son obligatorios en el User Profile del realm (VERIFY_PROFILE) —
+    # sin ellos el login por Direct Access Grant falla con "Account is not fully set up".
+    def create_user(self, email: str, password: str, first_name: str, last_name: str) -> str:
         try:
             service_token = self._get_service_token()
             response = requests.post(
@@ -76,6 +78,8 @@ class KeycloakService:
                 json={
                     "username": email,
                     "email": email,
+                    "firstName": first_name,
+                    "lastName": last_name,
                     "enabled": True,
                     "emailVerified": True,
                     "credentials": [{"type": "password", "value": password, "temporary": False}],

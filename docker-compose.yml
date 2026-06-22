@@ -4,8 +4,13 @@ services:
     container_name: soa_app
     restart: unless-stopped
     env_file: .env
+    ports:
+      - "8000:8000"  # solo para pruebas locales sin nginx (Postman directo). En la VPS no hace falta, nginx hace proxy interno.
     volumes:
       - ./models:/app/models
+      - insightface_cache:/root/.insightface  # evita re-descargar el modelo buffalo_l en cada rebuild/recreate
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # permite llegar al inference_service que corre en el host (fuera de Docker), simulando la PC local vía Tailscale
     depends_on:
       db:
         condition: service_healthy
@@ -127,12 +132,32 @@ services:
     image: grafana/grafana:11.0.0
     container_name: soa_grafana
     restart: unless-stopped
+    ports:
+      - "3000:3000"  # solo para pruebas locales sin nginx. En la VPS no hace falta, nginx hace proxy en /grafana/.
     environment:
       GF_SECURITY_ADMIN_PASSWORD: soa2026
-      GF_SERVER_ROOT_URL: https://soagmr.mooo.com/grafana/
-      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-https://soagmr.mooo.com/grafana/}
+      GF_SERVER_SERVE_FROM_SUB_PATH: ${GRAFANA_SERVE_FROM_SUB_PATH:-true}
+      # Login vía Keycloak (Authorization Code Flow) — client "grafana-client"
+      GF_AUTH_GENERIC_OAUTH_ENABLED: "true"
+      GF_AUTH_GENERIC_OAUTH_NAME: Keycloak
+      GF_AUTH_GENERIC_OAUTH_CLIENT_ID: grafana-client
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: ${GRAFANA_KEYCLOAK_CLIENT_SECRET}
+      GF_AUTH_GENERIC_OAUTH_SCOPES: "openid email profile"
+      # auth_url lo pega el NAVEGADOR → URL pública de Keycloak
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8080}/realms/${KEYCLOAK_REALM:-soa-realm}/protocol/openid-connect/auth
+      # token_url y api_url los pega Grafana server-side → red interna de Docker
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: http://keycloak:8080/realms/${KEYCLOAK_REALM:-soa-realm}/protocol/openid-connect/token
+      GF_AUTH_GENERIC_OAUTH_API_URL: http://keycloak:8080/realms/${KEYCLOAK_REALM:-soa-realm}/protocol/openid-connect/userinfo
+      GF_AUTH_GENERIC_OAUTH_ALLOW_SIGN_UP: "true"
+      # Solo ADMIN puede entrar a Grafana — si el claim realm_access.roles no contiene
+      # ADMIN, la expresión da '' (rol inválido) y, con STRICT=true, Grafana rechaza el login.
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH: "contains(realm_access.roles, 'ADMIN') && 'Admin' || ''"
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_STRICT: "true"
     volumes:
       - grafanadata:/var/lib/grafana
+    depends_on:
+      - keycloak
     networks:
       - soa_net
 
@@ -141,6 +166,7 @@ volumes:
   keycloak_pgdata:
   influxdata:
   grafanadata:
+  insightface_cache:
 
 networks:
   soa_net:

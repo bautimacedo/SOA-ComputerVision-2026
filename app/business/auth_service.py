@@ -12,7 +12,7 @@ def register(db: Session, nombre: str, apellido: str, email: str, password: str)
     if repo.get_by_email(email):
         raise ValueError("Ya existe una persona con ese email")
 
-    keycloak_id = app.business.keycloak_service.keycloak_service.create_user(email, password)
+    keycloak_id = app.business.keycloak_service.keycloak_service.create_user(email, password, nombre, apellido)
 
     try:
         return repo.create(nombre, apellido, email, None, keycloak_id)

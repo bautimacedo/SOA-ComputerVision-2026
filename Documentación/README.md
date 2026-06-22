@@ -29,9 +29,49 @@ En esta primera etapa no existe interfaz gráfica. Toda la interacción se reali
 ### Fase 2 — Pendiente
 
 - Interfaz gráfica (frontend)
-- Autenticación y autorización con Keycloak (OAuth2 / JWT)
 - Autenticación biométrica opcional (login por reconocimiento facial)
+
+### Fase 2 — Implementado
+
+- Autenticación y autorización con Keycloak (OAuth2 / JWT)
 - Monitoreo con Telegraf + Grafana + InfluxDB
+
+---
+
+## Roles y permisos
+
+El sistema define tres roles de usuario, gestionados centralmente en **Keycloak** — no en la base de datos propia ni en el código del backend:
+
+- **admin** — gestión completa del sistema. Es el único rol con acceso a los dashboards de **Grafana**.
+- **operator** — carga de imágenes y consultas. Es el rol que se asigna **por defecto** a todo usuario nuevo.
+- **viewer** — acceso de solo lectura.
+
+### Matriz de permisos por endpoint
+
+| Endpoint | Acción | admin | operator | viewer |
+|---|---|---|---|---|
+| `GET /models` (S1) | Leer | ✅ | ✅ | ✅ |
+| `POST /detections` (S2) | Cargar | ✅ | ✅ | ❌ |
+| `GET /frames/{id}` (S3) | Leer | ✅ | ✅ | ✅ |
+| `GET /frames/search` (S4) | Leer | ✅ | ✅ | ✅ |
+| `POST /persons` (S5.1) | Cargar | ✅ | ✅ | ❌ |
+| `GET /persons/{id}` (S5.2) | Leer | ✅ | ✅ | ✅ |
+| `POST /persons/{id}/embeddings` (S5.3) | Cargar | ✅ | ✅ | ❌ |
+| `POST /face-recognition` (S5.4) | Consultar | ✅ | ✅ | ❌ |
+| `POST /auth/register`, `/login`, `/refresh` | — | Público | Público | Público |
+| `GET /health` | — | Público | Público | Público |
+| Dashboards de Grafana | Leer | ✅ (único) | ❌ | ❌ |
+
+**Criterio**: `viewer` accede solo a los `GET` (lectura pura). `operator` agrega los `POST` que implican cargar imágenes o gestionar personas, más el reconocimiento facial (es un `POST`, pero semánticamente es una consulta: "¿quién es esta persona?", no una carga de datos nuevos). `admin` tiene todo lo de `operator` y además es el único con acceso a Grafana. Hoy no existe ningún endpoint exclusivo de `admin` dentro de la propia API — la diferencia práctica entre `admin` y `operator` es, por ahora, únicamente Grafana.
+
+### Gestión de roles
+
+Los roles se gestionan **enteramente desde la consola de administración de Keycloak**, no desde la API ni desde la base de datos propia:
+
+- Los tres roles (`ADMIN`, `OPERATOR`, `VIEWER`) son *realm roles*, creados en `Realm roles` dentro de `soa-realm`.
+- `OPERATOR` está configurado como rol asociado de `default-roles-soa-realm`, por lo que se asigna **automáticamente** a cualquier usuario nuevo, ya sea registrado vía `POST /auth/register` o creado manualmente desde la consola.
+- Para asignar `ADMIN` o `VIEWER` a un usuario puntual: consola de Keycloak → `Users` → seleccionar el usuario → pestaña `Role mapping` → `Assign role`. Es un paso manual — no existe (todavía) un endpoint propio para que un admin cambie el rol de otro usuario desde nuestra API.
+- El backend (FastAPI) **nunca asigna ni modifica roles** — solo los **lee** desde el JWT (claim `realm_access.roles`) para decidir si autoriza o rechaza una request. Keycloak es la única fuente de verdad sobre quién tiene qué rol.
 
 ---
 

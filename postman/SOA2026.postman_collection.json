@@ -1,0 +1,412 @@
+{
+  "info": {
+    "name": "SOA 2026 — Sistema completo",
+    "description": "Colección completa: Auth (Keycloak), S1-S5, health checks e inference_service directo. Importar junto con el environment 'SOA2026-local'.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "frame_id", "value": "" },
+    { "key": "person_id", "value": "" },
+    { "key": "access_token", "value": "" },
+    { "key": "refresh_token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Sistema",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "noauth" },
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST /auth/register",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Marti\",\n  \"apellido\": \"Test\",\n  \"email\": \"marti@test.com\",\n  \"password\": \"Secreto123!\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/register", "host": ["{{baseUrl}}"], "path": ["auth", "register"] },
+            "description": "Crea el usuario en Keycloak (con firstName/lastName) y en persons. Si el email ya existe, devuelve 409 — es esperado en corridas repetidas, no es un error real."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created o 409 si ya existe', () => pm.expect([201, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/login",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"marti@test.com\",\n  \"password\": \"Secreto123!\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] },
+            "description": "Devuelve access_token + refresh_token. El script de test los guarda automáticamente como variables de colección para que el resto de los requests (que usan Bearer {{access_token}}) funcionen sin copiar/pegar nada."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('access_token', body.access_token);",
+                  "pm.collectionVariables.set('refresh_token', body.refresh_token);",
+                  "pm.test('trae access_token', () => pm.expect(body.access_token).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/refresh",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["auth", "refresh"] },
+            "description": "Renueva el access_token sin pedir contraseña de nuevo. Requiere haber corrido /auth/login antes (para tener refresh_token guardado)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('access_token', body.access_token);",
+                  "pm.collectionVariables.set('refresh_token', body.refresh_token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "S1 - Modelos",
+      "item": [
+        {
+          "name": "GET /models (sin token -> 401)",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": { "raw": "{{baseUrl}}/models", "host": ["{{baseUrl}}"], "path": ["models"] },
+            "description": "Request a propósito sin Authorization, para confirmar que el endpoint está protegido."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('401 sin token', () => pm.response.to.have.status(401));"] }
+            }
+          ]
+        },
+        {
+          "name": "GET /models",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/models", "host": ["{{baseUrl}}"], "path": ["models"] },
+            "description": "Lista los modelos YOLO disponibles en el inference_service. Usa el Bearer token de la colección (corré /auth/login primero)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('es una lista', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "S2 - Detección",
+      "item": [
+        {
+          "name": "POST /detections",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "image", "type": "file", "src": [] },
+                { "key": "model_id", "value": "yolo26n.pt", "type": "text" },
+                { "key": "metadata", "value": "{\"lat\": -34.6037, \"lon\": -58.3816}", "type": "text" }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/detections", "host": ["{{baseUrl}}"], "path": ["detections"] },
+            "description": "IMPORTANTE: en el campo 'image' hay que seleccionar manualmente un archivo JPG/PNG desde tu PC (Postman no puede embeber archivos binarios en una colección exportada). model_id tiene que ser uno de los que devuelve GET /models."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "if (body.frameId) { pm.collectionVariables.set('frame_id', body.frameId); }",
+                  "pm.test('trae frameId y detections', () => { pm.expect(body.frameId).to.be.a('string'); pm.expect(body.detections).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "S3 - Fotogramas",
+      "item": [
+        {
+          "name": "GET /frames/{{frame_id}}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/frames/{{frame_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["frames", "{{frame_id}}"]
+            },
+            "description": "Requiere haber corrido POST /detections antes (para tener frame_id guardado). Devuelve la imagen JPEG original como binario."
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"] } }
+          ]
+        },
+        {
+          "name": "GET /frames/{{frame_id}}?thumbnail=true",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/frames/{{frame_id}}?thumbnail=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["frames", "{{frame_id}}"],
+              "query": [{ "key": "thumbnail", "value": "true" }]
+            },
+            "description": "Misma imagen, pero reducida a máx 320x320."
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"] } }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "S4 - Búsqueda",
+      "item": [
+        {
+          "name": "GET /frames/search",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58",
+              "host": ["{{baseUrl}}"],
+              "path": ["frames", "search"],
+              "query": [
+                { "key": "lat_min", "value": "-35" },
+                { "key": "lat_max", "value": "-34" },
+                { "key": "lon_min", "value": "-59" },
+                { "key": "lon_max", "value": "-58" }
+              ]
+            },
+            "description": "Busca fotogramas en el rango de coordenadas que coincide con el ejemplo de S2 (-34.6037,-58.3816). Probá agregar &classes=person o &model_id=yolo26n.pt para los filtros opcionales."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('es una lista', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "S5 - Personas y Reconocimiento Facial",
+      "item": [
+        {
+          "name": "POST /persons",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Persona\",\n  \"apellido\": \"Prueba\",\n  \"email\": \"persona.prueba@test.com\",\n  \"extra\": {\"sector\": \"test\"}\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/persons", "host": ["{{baseUrl}}"], "path": ["persons"] },
+            "description": "Registra una persona para reconocimiento facial (independiente de los usuarios de login — esta persona no tiene credenciales ni keycloak_id)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created o 409 si ya existe', () => pm.expect([201, 409]).to.include(pm.response.code));",
+                  "if (pm.response.code === 201) { pm.collectionVariables.set('person_id', pm.response.json().id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /persons/{{person_id}}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/persons/{{person_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["persons", "{{person_id}}"]
+            },
+            "description": "Requiere haber corrido POST /persons antes (para tener person_id guardado)."
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"] } }
+          ]
+        },
+        {
+          "name": "POST /persons/{{person_id}}/embeddings",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [{ "key": "images", "type": "file", "src": [] }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/persons/{{person_id}}/embeddings",
+              "host": ["{{baseUrl}}"],
+              "path": ["persons", "{{person_id}}", "embeddings"]
+            },
+            "description": "IMPORTANTE: seleccioná manualmente una o más fotos con un rostro claro y único en el campo 'images' (se pueden agregar varias filas 'images' como el mismo key para mandar múltiples archivos)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('al menos un embedding valido', () => pm.expect(body.validEmbeddings).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /face-recognition",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "image", "type": "file", "src": [] },
+                { "key": "threshold", "value": "0.8", "type": "text" }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/face-recognition", "host": ["{{baseUrl}}"], "path": ["face-recognition"] },
+            "description": "Subí una foto de la MISMA persona que cargaste en /embeddings para que matchee. Si subís una foto de otra persona, esperá personId: null."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Debug directo (sin pasar por la API)",
+      "item": [
+        {
+          "name": "inference_service - GET /health",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": { "raw": "{{inferenceUrl}}/health", "host": ["{{inferenceUrl}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "inference_service - GET /models",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": { "raw": "{{inferenceUrl}}/models", "host": ["{{inferenceUrl}}"], "path": ["models"] }
+          }
+        },
+        {
+          "name": "Keycloak - Direct Access Grant directo",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password" },
+                { "key": "client_id", "value": "soa-client" },
+                { "key": "client_secret", "value": "{{keycloak_client_secret}}" },
+                { "key": "username", "value": "marti@test.com" },
+                { "key": "password", "value": "Secreto123!" }
+              ]
+            },
+            "url": {
+              "raw": "{{keycloakUrl}}/realms/soa-realm/protocol/openid-connect/token",
+              "host": ["{{keycloakUrl}}"],
+              "path": ["realms", "soa-realm", "protocol", "openid-connect", "token"]
+            },
+            "description": "Bypasea nuestra API y le pega directo a Keycloak — útil para diferenciar 'el problema está en Keycloak' de 'el problema está en nuestro backend'. Necesita la variable keycloak_client_secret seteada en el environment."
+          }
+        }
+      ]
+    }
+  ]
+}
