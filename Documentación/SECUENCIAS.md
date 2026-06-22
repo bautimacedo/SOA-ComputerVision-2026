@@ -354,7 +354,7 @@ sequenceDiagram
         Note over F: Client Credentials Grant —<br/>la app se autentica como sí misma,<br/>no hay usuario humano involucrado
 
         F->>KC: POST /realms/soa-realm/protocol/openid-connect/token<br/>grant_type=client_credentials<br/>client_id + client_secret
-        KC-->>F: 200<br/>{"access_token": "&lt;service_token&gt;"}
+        KC-->>F: 200<br/>{"access_token": "service_token"}
 
         Note over F: service_token representa al<br/>service account soa-client,<br/>con el rol manage-users
 
@@ -415,7 +415,7 @@ sequenceDiagram
         F-->>N: 401 Credenciales inválidas
         N-->>C: 401
     else OK
-        KC-->>F: 200<br/>{"access_token":"&lt;jwt&gt;","refresh_token":"&lt;jwt&gt;",<br/>"expires_in":300,"refresh_expires_in":1800}
+        KC-->>F: 200<br/>{"access_token":"jwt_access","refresh_token":"jwt_refresh",<br/>"expires_in":300,"refresh_expires_in":1800}
 
         Note over F: jwt.decode(access_token, verify_signature=False)<br/>Solo para leer el claim "sub" —<br/>no hace falta verificar la firma:<br/>el token llegó en una respuesta<br/>directa de Keycloak que el propio<br/>backend acaba de solicitar
 
@@ -443,10 +443,10 @@ sequenceDiagram
     participant F as FastAPI
     participant KC as Keycloak
 
-    C->>N: POST /auth/refresh<br/>{"refresh_token":"&lt;jwt&gt;"}<br/>HTTPS :443
+    C->>N: POST /auth/refresh<br/>{"refresh_token":"jwt_refresh"}<br/>HTTPS :443
     N->>F: POST /auth/refresh<br/>HTTP :8000
 
-    F->>KC: POST /realms/soa-realm/protocol/openid-connect/token<br/>grant_type=refresh_token<br/>client_id + client_secret<br/>refresh_token=&lt;jwt&gt;
+    F->>KC: POST /realms/soa-realm/protocol/openid-connect/token<br/>grant_type=refresh_token<br/>client_id + client_secret<br/>refresh_token=jwt_refresh
 
     alt Keycloak caído
         KC-->>F: ConnectionError
@@ -457,7 +457,7 @@ sequenceDiagram
         F-->>N: 401 Refresh token inválido o expirado
         N-->>C: 401
     else OK
-        KC-->>F: 200<br/>{"access_token":"&lt;jwt nuevo&gt;",<br/>"refresh_token":"&lt;jwt nuevo&gt;","expires_in":300}
+        KC-->>F: 200<br/>{"access_token":"jwt_nuevo",<br/>"refresh_token":"jwt_nuevo","expires_in":300}
         F-->>N: 200 OK<br/>{"access_token":"...","refresh_token":"...","expires_in":300}
         N-->>C: 200 OK
     end
@@ -476,12 +476,12 @@ sequenceDiagram
     participant F as FastAPI
     participant KC as Keycloak
 
-    C->>N: Request a cualquier endpoint S1-S5<br/>Authorization: Bearer &lt;access_token&gt;<br/>HTTPS :443
+    C->>N: Request a cualquier endpoint S1-S5<br/>Authorization: Bearer jwt_access<br/>HTTPS :443
     N->>F: Request<br/>HTTP :8000
 
     Note over F: OAuth2PasswordBearer extrae el token<br/>del header Authorization
 
-    alt Header ausente o sin forma "Bearer &lt;token&gt;"
+    alt Header ausente o sin forma Bearer token
         F-->>N: 401 No autenticado
         N-->>C: 401
     else Header presente
