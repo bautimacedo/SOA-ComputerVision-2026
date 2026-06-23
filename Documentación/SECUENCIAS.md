@@ -180,7 +180,7 @@ sequenceDiagram
 
     Note over F: Construye respuesta:<br/>frameId, imageURL, metadata, detections
 
-    F-->>N: 200 OK<br/>[<br/>  {<br/>    "frameId": "uuid",<br/>    "imageURL": "https://soagmr.mooo.com/frames/uuid",<br/>    "metadata": {"lat":-34.6,"lon":-58.3,"camara":"cam_01"},<br/>    "detections": [{"objects":[...]}]<br/>  }<br/>]
+    F-->>N: 200 OK<br/>[<br/>  {<br/>    "frameId": "uuid",<br/>    "imageURL": "https://soagmr.mooo.com/api/frames/uuid",<br/>    "metadata": {"lat":-34.6,"lon":-58.3,"camara":"cam_01"},<br/>    "detections": [{"objects":[...]}]<br/>  }<br/>]
     N-->>C: 200 OK<br/>Lista de resultados (puede ser [])
 ```
 

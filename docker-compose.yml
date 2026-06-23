@@ -15,6 +15,13 @@ services:
     networks:
       - soa_net
 
+  frontend:
+    build: ./frontend
+    container_name: soa_frontend
+    restart: unless-stopped
+    networks:
+      - soa_net
+
   db:
     image: pgvector/pgvector:pg16
     container_name: soa_db
@@ -46,6 +53,7 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - app
+      - frontend
     networks:
       - soa_net
 

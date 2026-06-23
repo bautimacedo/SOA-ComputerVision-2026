@@ -116,7 +116,7 @@ sudo certbot --nginx -d soagmr.mooo.com -d auth.soagmr.mooo.com --expand
 docker compose up -d
 
 # 8. Verificar que todo levantó
-curl https://soagmr.mooo.com/health
+curl https://soagmr.mooo.com/api/health
 curl https://auth.soagmr.mooo.com/realms/soa-realm
 ```
 
@@ -208,7 +208,7 @@ Todos los ejemplos usan el dominio de producción.
 ### S1 — Listar modelos disponibles
 
 ```bash
-curl https://soagmr.mooo.com/models
+curl https://soagmr.mooo.com/api/models
 # ["yolo26n.pt","yolo26x.pt"]
 ```
 
@@ -231,13 +231,13 @@ cualquier atributo relevante para el caso de uso:
 
 ```bash
 # Mínimo requerido
-curl -X POST https://soagmr.mooo.com/detections \
+curl -X POST https://soagmr.mooo.com/api/detections \
   -F "image=@foto.jpg" \
   -F "model_id=yolo11n.pt" \
   -F 'metadata={"lat":-34.6037,"lon":-58.3816}'
 
 # Con campos adicionales
-curl -X POST https://soagmr.mooo.com/detections \
+curl -X POST https://soagmr.mooo.com/api/detections \
   -F "image=@foto.jpg" \
   -F "model_id=yolo11n.pt" \
   -F 'metadata={"lat":-34.6037,"lon":-58.3816,"camara":"cam_01","piso":3,"zona":"acceso_norte"}'
@@ -256,10 +256,10 @@ curl -X POST https://soagmr.mooo.com/detections \
 
 ```bash
 # Imagen original
-curl -o imagen.jpg https://soagmr.mooo.com/frames/550e8400-e29b-41d4-a716-446655440000
+curl -o imagen.jpg https://soagmr.mooo.com/api/frames/550e8400-e29b-41d4-a716-446655440000
 
 # Thumbnail (máx 320x320)
-curl -o thumb.jpg "https://soagmr.mooo.com/frames/550e8400-e29b-41d4-a716-446655440000?thumbnail=true"
+curl -o thumb.jpg "https://soagmr.mooo.com/api/frames/550e8400-e29b-41d4-a716-446655440000?thumbnail=true"
 ```
 
 ### S4 — Buscar fotogramas por ubicación, modelo, clase y metadatos
@@ -285,25 +285,25 @@ Todos los filtros se aplican en conjunto (AND): solo se retornan fotogramas que 
 
 ```bash
 # Solo por coordenadas
-curl "https://soagmr.mooo.com/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58"
+curl "https://soagmr.mooo.com/api/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58"
 
 # Filtrando por modelo
-curl "https://soagmr.mooo.com/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58&model_id=best.pt"
+curl "https://soagmr.mooo.com/api/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58&model_id=best.pt"
 
 # Filtrando por clase detectada
-curl "https://soagmr.mooo.com/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58&classes=person"
+curl "https://soagmr.mooo.com/api/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58&classes=person"
 
 # Múltiples clases (retorna frames que tengan al menos una)
-curl "https://soagmr.mooo.com/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58&classes=person&classes=zebra"
+curl "https://soagmr.mooo.com/api/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58&classes=person&classes=zebra"
 
 # Filtrando por metadato (solo fotogramas de la cámara cam_01)
-curl "https://soagmr.mooo.com/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58&metadata=%7B%22camara%22%3A%22cam_01%22%7D"
+curl "https://soagmr.mooo.com/api/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58&metadata=%7B%22camara%22%3A%22cam_01%22%7D"
 
 # Múltiples campos de metadatos
-curl "https://soagmr.mooo.com/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58&metadata=%7B%22camara%22%3A%22cam_01%22%2C%22piso%22%3A3%7D"
+curl "https://soagmr.mooo.com/api/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58&metadata=%7B%22camara%22%3A%22cam_01%22%2C%22piso%22%3A3%7D"
 
 # Todo combinado: coordenadas + modelo + clase + metadato
-curl "https://soagmr.mooo.com/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58&model_id=best.pt&classes=person&metadata=%7B%22zona%22%3A%22acceso_norte%22%7D"
+curl "https://soagmr.mooo.com/api/frames/search?lat_min=-35&lat_max=-34&lon_min=-59&lon_max=-58&model_id=best.pt&classes=person&metadata=%7B%22zona%22%3A%22acceso_norte%22%7D"
 ```
 
 > Los valores de `metadata` están URL-encoded en curl. `{"camara":"cam_01"}` → `%7B%22camara%22%3A%22cam_01%22%7D`.
@@ -324,7 +324,7 @@ Con este servicio se cargan los datos básicos de una persona, como nombre, apel
 Ejemplo de uso:
 
 ```bash
-BASE_URL="https://soagmr.mooo.com"
+BASE_URL="https://soagmr.mooo.com/api"
 
 curl -k -X POST "$BASE_URL/persons" \
   -H "Content-Type: application/json" \
@@ -363,7 +363,7 @@ GET /persons/{person_id}
 Este permite consultar los datos de una persona a partir de su identificador único.
 
 ```bash
-BASE_URL="https://soagmr.mooo.com"
+BASE_URL="https://soagmr.mooo.com/api"
 PERSON_ID="ba2d51e1-f412-488f-a650-06a9aaed625e"
 
 curl -k "$BASE_URL/persons/$PERSON_ID"
@@ -410,18 +410,18 @@ El flujo interno es:
 8. Si una imagen no se puede leer, no tiene rostro o tiene más de un rostro, se cuenta como rechazada.
 
 ```bash
-BASE_URL=”https://soagmr.mooo.com”
-PERSON_ID=”ba2d51e1-f412-488f-a650-06a9aaed625e”
+BASE_URL="https://soagmr.mooo.com/api"
+PERSON_ID="ba2d51e1-f412-488f-a650-06a9aaed625e"
 
 # Una imagen
-curl -k -X POST “$BASE_URL/persons/$PERSON_ID/embeddings” \
-  -F “images=@foto1.jpg”
+curl -k -X POST "$BASE_URL/persons/$PERSON_ID/embeddings" \
+  -F "images=@foto1.jpg"
 
 # Varias imágenes en la misma request
-curl -k -X POST “$BASE_URL/persons/$PERSON_ID/embeddings” \
-  -F “images=@foto1.jpg” \
-  -F “images=@foto2.jpg” \
-  -F “images=@foto3.jpg”
+curl -k -X POST "$BASE_URL/persons/$PERSON_ID/embeddings" \
+  -F "images=@foto1.jpg" \
+  -F "images=@foto2.jpg" \
+  -F "images=@foto3.jpg"
 ```
 
 Ejemplo de respuesta:
@@ -483,7 +483,7 @@ LIMIT 1;
 El operador `<=>` de pgvector calcula distancia coseno. Cuanto menor es la distancia, más parecidos son los rostros.
 
 ```bash
-BASE_URL="https://soagmr.mooo.com"
+BASE_URL="https://soagmr.mooo.com/api"
 
 # Con threshold por defecto (0.8)
 curl -k -X POST "$BASE_URL/face-recognition" \
@@ -715,4 +715,4 @@ Esto desacopla el almacenamiento del servidor: el disco del VPS no crece con cad
 | `lon_max` | float | Sí | Longitud máxima del rango |
 | `classes` | string (repetible) | No | Clases a filtrar (ej: `&classes=person&classes=car`) |
 
-La documentación interactiva completa está disponible en `https://soagmr.mooo.com/docs`.
+La documentación interactiva completa está disponible en `https://soagmr.mooo.com/api/docs`.
