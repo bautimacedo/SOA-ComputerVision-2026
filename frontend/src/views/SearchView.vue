@@ -50,6 +50,30 @@ function closePreview() {
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = null
 }
+
+const downloadingId = ref(null)
+
+// api.get ya manda el header de Authorization — por eso no se puede usar un
+// <a href="..."> directo, hay que traer el blob nosotros y "forzar" la descarga.
+async function downloadImage(frameId, thumbnail) {
+  downloadingId.value = `${frameId}-${thumbnail}`
+  try {
+    const path = thumbnail ? `/frames/${frameId}?thumbnail=true` : `/frames/${frameId}`
+    const res = await api.get(path)
+    if (!res.ok || !res.blob) return
+
+    const url = URL.createObjectURL(res.blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${frameId}${thumbnail ? '_thumb' : ''}.jpg`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } finally {
+    downloadingId.value = null
+  }
+}
 </script>
 
 <template>
@@ -147,9 +171,25 @@ function closePreview() {
                 </span>
               </td>
               <td>
-                <button class="btn btn-sm btn-outline-primary" @click="showPreview(r.frameId)">
-                  <i class="bi bi-image me-1"></i>Ver
-                </button>
+                <div class="btn-group">
+                  <button class="btn btn-sm btn-outline-primary" @click="showPreview(r.frameId)">
+                    <i class="bi bi-image me-1"></i>Ver
+                  </button>
+                  <button
+                    class="btn btn-sm btn-outline-secondary"
+                    :disabled="downloadingId === `${r.frameId}-false`"
+                    @click="downloadImage(r.frameId, false)"
+                  >
+                    <i class="bi bi-download me-1"></i>Foto
+                  </button>
+                  <button
+                    class="btn btn-sm btn-outline-secondary"
+                    :disabled="downloadingId === `${r.frameId}-true`"
+                    @click="downloadImage(r.frameId, true)"
+                  >
+                    <i class="bi bi-download me-1"></i>Thumbnail
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>

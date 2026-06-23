@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import api from '../services/api.js'
 
 const models = ref([])
@@ -13,6 +13,69 @@ const result = ref(null)
 const error = ref('')
 const loading = ref(false)
 const loadingModels = ref(true)
+
+const canvasRef = ref(null)
+const loadingBoxes = ref(false)
+
+// Un color distinto por clase detectada, para diferenciarlas a simple vista.
+const BOX_COLORS = ['#22c55e', '#3b82f6', '#f97316', '#e11d48', '#a855f7', '#eab308', '#06b6d4']
+function colorForClass(className) {
+  let hash = 0
+  for (const ch of className) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  return BOX_COLORS[hash % BOX_COLORS.length]
+}
+
+async function loadResultImage(frameId, detections) {
+  loadingBoxes.value = true
+  try {
+    const res = await api.get(`/frames/${frameId}`)
+    if (!res.ok || !res.blob) return
+
+    const imgUrl = URL.createObjectURL(res.blob)
+    const img = new Image()
+    img.onload = () => {
+      drawBoxes(img, detections)
+      URL.revokeObjectURL(imgUrl)
+    }
+    img.src = imgUrl
+  } finally {
+    loadingBoxes.value = false
+  }
+}
+
+function drawBoxes(img, detections) {
+  const canvas = canvasRef.value
+  if (!canvas) return
+
+  canvas.width = img.naturalWidth
+  canvas.height = img.naturalHeight
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(img, 0, 0)
+
+  for (const d of detections) {
+    if (!d.bbox || d.bbox.length !== 4) continue
+    const [x1, y1, x2, y2] = d.bbox
+    const px1 = x1 * canvas.width
+    const py1 = y1 * canvas.height
+    const boxW = (x2 - x1) * canvas.width
+    const boxH = (y2 - y1) * canvas.height
+    const color = colorForClass(d.class)
+
+    ctx.strokeStyle = color
+    ctx.lineWidth = Math.max(2, canvas.width / 400)
+    ctx.strokeRect(px1, py1, boxW, boxH)
+
+    const label = `${d.class} ${(d.confidence * 100).toFixed(0)}%`
+    ctx.font = `${Math.max(14, canvas.width / 60)}px sans-serif`
+    const textW = ctx.measureText(label).width
+    const textH = Math.max(14, canvas.width / 60) + 6
+
+    ctx.fillStyle = color
+    ctx.fillRect(px1, Math.max(0, py1 - textH), textW + 8, textH)
+    ctx.fillStyle = '#fff'
+    ctx.fillText(label, px1 + 4, Math.max(textH - 4, py1 - 6))
+  }
+}
 
 onMounted(async () => {
   const res = await api.get('/models')
@@ -67,6 +130,8 @@ async function handleDetect() {
     return
   }
   result.value = res.data
+  await nextTick() // espera a que el <canvas> exista en el DOM (aparece con v-if="result")
+  loadResultImage(result.value.frameId, result.value.detections)
 }
 </script>
 
@@ -142,6 +207,13 @@ async function handleDetect() {
               <div class="stat-label">Modelo</div>
               <span class="badge bg-primary">{{ result.modelId }}</span>
             </div>
+          </div>
+
+          <div class="text-center mb-3 position-relative">
+            <div v-if="loadingBoxes" class="text-muted small mb-2">
+              <i class="bi bi-hourglass-split me-1"></i>Cargando imagen...
+            </div>
+            <canvas ref="canvasRef" class="img-fluid rounded border"></canvas>
           </div>
 
           <div class="d-flex align-items-center mb-3 gap-3">
