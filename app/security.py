@@ -20,7 +20,10 @@ def _get_jwks_client() -> PyJWKClient:
 
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
-    issuer = f"{app.config.settings.keycloak_url}/realms/{app.config.settings.keycloak_realm}"
+    # El issuer del token lo determina Keycloak vía KC_HOSTNAME (URL pública),
+    # sin importar qué URL usó el backend para pedirlo — por eso comparamos
+    # contra keycloak_public_url, no contra keycloak_url (la interna de Docker).
+    issuer = f"{app.config.settings.keycloak_public_url}/realms/{app.config.settings.keycloak_realm}"
     try:
         signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
         claims = jwt.decode(
