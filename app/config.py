@@ -27,11 +27,6 @@ class Settings(BaseSettings):
     keycloak_client_id: str = "soa-client"
     keycloak_client_secret: str = ""
 
-    # URL pública de Keycloak — la usa Keycloak mismo para el claim "iss" de los
-    # tokens (vía KC_HOSTNAME), independientemente de qué URL haya usado el backend
-    # para pedirlos. Tiene que coincidir con KC_HOSTNAME para validar el issuer bien.
-    keycloak_public_url: str = "http://localhost:8080"
-
     class Config:
         env_file = ".env"
 

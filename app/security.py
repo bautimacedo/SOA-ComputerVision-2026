@@ -1,4 +1,5 @@
 import jwt
+import requests
 from jwt import PyJWKClient
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
@@ -9,6 +10,7 @@ import app.config
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 _jwks_client = None
+_issuer = None
 
 
 def _get_jwks_client() -> PyJWKClient:
@@ -19,18 +21,27 @@ def _get_jwks_client() -> PyJWKClient:
     return _jwks_client
 
 
+def _get_issuer() -> str:
+    # No se compone a mano: según KC_HOSTNAME + cómo llegó la conexión, Keycloak
+    # puede poner un "iss" con scheme/puerto que no coinciden ni con la URL interna
+    # ni con la pública (ej. http://dominio:8080 si el pedido no pasó por nginx).
+    # Se le pregunta directamente al endpoint de discovery, por la misma ruta
+    # interna que usamos para pedir tokens, así siempre coincide.
+    global _issuer
+    if _issuer is None:
+        url = f"{app.config.settings.keycloak_url}/realms/{app.config.settings.keycloak_realm}/.well-known/openid-configuration"
+        _issuer = requests.get(url, timeout=10).json()["issuer"]
+    return _issuer
+
+
 def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
-    # El issuer del token lo determina Keycloak vía KC_HOSTNAME (URL pública),
-    # sin importar qué URL usó el backend para pedirlo — por eso comparamos
-    # contra keycloak_public_url, no contra keycloak_url (la interna de Docker).
-    issuer = f"{app.config.settings.keycloak_public_url}/realms/{app.config.settings.keycloak_realm}"
     try:
         signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
         claims = jwt.decode(
             token,
             signing_key.key,
             algorithms=["RS256"],
-            issuer=issuer,
+            issuer=_get_issuer(),
             options={"verify_aud": False},  # Keycloak usa aud="account" por defecto; validamos azp en su lugar
         )
     except jwt.PyJWTError:
