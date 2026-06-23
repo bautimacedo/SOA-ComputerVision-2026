@@ -28,7 +28,7 @@ Importar en Postman: la colección + el environment, y completar la variable `ke
   - `sub` es un UUID
   - `realm_access.roles` incluye `OPERATOR`
   - `azp` es `soa-client`
-  - `iss` es `http://keycloak:8080/realms/soa-realm`
+  - `iss` coincide con lo que devuelve `GET /realms/soa-realm/.well-known/openid-configuration` en el campo `issuer` (puede variar según `KC_HOSTNAME` y cómo se pidió el token — no asumir que es literalmente la URL interna o la pública sin verificarlo)
 - [ ] `POST /auth/refresh` con el `refresh_token` recién obtenido → `200`, tokens nuevos
 - [ ] `POST /auth/refresh` con un refresh_token inventado/corrupto → `401`
 - [ ] Esperar 5 minutos (vida del access_token) y usar ese token vencido en `GET /models` → `401` → renovar con `/auth/refresh` → reintentar → `200`
@@ -37,12 +37,13 @@ Importar en Postman: la colección + el environment, y completar la variable `ke
 
 ## 2. Roles (ADMIN / OPERATOR / VIEWER)
 
-⚠️ **Importante, antes de probar esto**: hoy los endpoints solo verifican *"¿hay un token válido?"* (`get_current_user`), no *"¿qué rol tiene ese token?"* (`require_role`). La matriz de permisos del README es el diseño acordado, pero **todavía no está aplicada en el código** — cualquier usuario autenticado, sea `OPERATOR` o `VIEWER`, puede hoy llamar a cualquier endpoint, incluidos los `POST`. Las pruebas de esta sección van a **fallar** (en el sentido de "el viewer sí puede postear") hasta que agreguemos `require_role(...)` a los routers correspondientes. Avisame si querés que lo implementemos antes de seguir.
+Ya implementado: los endpoints `GET` (S1, S3, S4, S5.2) aceptan cualquier rol autenticado; los `POST` que cargan datos (S2, S5.1, S5.3, S5.4) requieren `OPERATOR` o `ADMIN` vía `require_role(...)` — `VIEWER` recibe `403`.
 
 - [ ] Crear un usuario y, desde la consola de Keycloak (`Users` → el usuario → `Role mapping` → `Assign role`), asignarle `ADMIN`. Loguearse con `/auth/login` y confirmar que el JWT trae `ADMIN` en `realm_access.roles`.
-- [ ] Repetir asignando `VIEWER` a otro usuario.
-- [ ] (Una vez implementado `require_role`) Con un token de `VIEWER`, intentar `POST /detections` → debería dar `403`.
-- [ ] (Una vez implementado) Con un token de `OPERATOR`, intentar lo mismo → debería dar `201` (operator puede cargar).
+- [ ] Repetir asignando `VIEWER` a otro usuario (sacándole `OPERATOR` si lo tenía por default).
+- [ ] Con un token de `VIEWER`, intentar `POST /detections` → debería dar `403`.
+- [ ] Con un token de `OPERATOR`, intentar lo mismo → debería dar `201` (operator puede cargar).
+- [ ] Con un token de `VIEWER`, intentar `GET /models` → debería dar `200` (viewer puede leer).
 
 ---
 

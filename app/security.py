@@ -53,10 +53,10 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     return claims
 
 
-def require_role(role: str):
+def require_role(*allowed_roles: str):
     def checker(current_user: dict = Depends(get_current_user)) -> dict:
-        roles = current_user.get("realm_access", {}).get("roles", [])
-        if role not in roles:
+        user_roles = current_user.get("realm_access", {}).get("roles", [])
+        if not any(role in user_roles for role in allowed_roles):
             raise HTTPException(status_code=403, detail="No tenés permisos para esta acción")
         return current_user
 

@@ -13,7 +13,7 @@ import app.security
 from app.middleware.metrics import _send
 
 persons_router = APIRouter(prefix="/persons", tags=["S5 - Personas y Reconocimiento Facial"], dependencies=[Depends(app.security.get_current_user)])
-recognition_router = APIRouter(prefix="/face-recognition", tags=["S5 - Personas y Reconocimiento Facial"], dependencies=[Depends(app.security.get_current_user)])
+recognition_router = APIRouter(prefix="/face-recognition", tags=["S5 - Personas y Reconocimiento Facial"], dependencies=[Depends(app.security.require_role("OPERATOR", "ADMIN"))])
 
 
 # S5.1 — Registrar persona
@@ -27,8 +27,9 @@ recognition_router = APIRouter(prefix="/face-recognition", tags=["S5 - Personas 
         "El email debe ser único — devuelve 409 si ya existe una persona con ese email. "
         "El campo `extra` es libre (JSONB): puede incluir legajo, sector, rol, u otros atributos."
     ),
+    dependencies=[Depends(app.security.require_role("OPERATOR", "ADMIN"))],
 )
-def create_person(body: app.dtos.person.PersonCreate, 
+def create_person(body: app.dtos.person.PersonCreate,
                   db: Session = Depends(app.database.get_db)):
     
     repo = app.repositories.person_repository.PersonRepository(db)
@@ -63,6 +64,7 @@ def get_person(person_id: UUID, db: Session = Depends(app.database.get_db)):
         "y se contabilizan en `rejectedImages`, sin interrumpir el procesamiento del resto. "
         "Los embeddings válidos se almacenan en PostgreSQL con pgvector asociados a la persona."
     ),
+    dependencies=[Depends(app.security.require_role("OPERATOR", "ADMIN"))],
 )
 # solo podemos usar await si declaramos la función como async.
 async def generate_embeddings(
