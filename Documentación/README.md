@@ -43,8 +43,10 @@ En esta primera etapa no existe interfaz gráfica. Toda la interacción se reali
 El sistema define tres roles de usuario, gestionados centralmente en **Keycloak** — no en la base de datos propia ni en el código del backend:
 
 - **admin** — gestión completa del sistema. Es el único rol con acceso a los dashboards de **Grafana**.
-- **operator** — carga de imágenes y consultas. Es el rol que se asigna **por defecto** a todo usuario nuevo.
+- **operator** — carga de imágenes y consultas. Se asigna manualmente (ver nota abajo) — no es el rol por defecto.
 - **viewer** — acceso de solo lectura.
+
+Un usuario recién registrado, sin ningún rol de los tres asignado todavía, ya puede leer (`GET`) — los endpoints de lectura no exigen ningún rol puntual, solo estar autenticado. El rol `viewer` no hace falta asignarlo para habilitar lectura; existe principalmente como etiqueta explícita para alguien que **no** debería tener `operator`/`admin`. Para poder cargar datos (`POST`), un admin tiene que asignarle `operator` a mano desde la consola de Keycloak.
 
 ### Matriz de permisos por endpoint
 
@@ -69,8 +71,8 @@ El sistema define tres roles de usuario, gestionados centralmente en **Keycloak*
 Los roles se gestionan **enteramente desde la consola de administración de Keycloak**, no desde la API ni desde la base de datos propia:
 
 - Los tres roles (`ADMIN`, `OPERATOR`, `VIEWER`) son *realm roles*, creados en `Realm roles` dentro de `soa-realm`.
-- `OPERATOR` está configurado como rol asociado de `default-roles-soa-realm`, por lo que se asigna **automáticamente** a cualquier usuario nuevo, ya sea registrado vía `POST /auth/register` o creado manualmente desde la consola.
-- Para asignar `ADMIN` o `VIEWER` a un usuario puntual: consola de Keycloak → `Users` → seleccionar el usuario → pestaña `Role mapping` → `Assign role`. Es un paso manual — no existe (todavía) un endpoint propio para que un admin cambie el rol de otro usuario desde nuestra API.
+- **Ninguno de los tres se asigna por defecto.** En un primer intento se había puesto `OPERATOR` como rol asociado de `default-roles-soa-realm` (para que todo usuario nuevo lo recibiera automáticamente) — pero como ese rol compuesto se le asigna a **todos** los usuarios sin excepción, hacía que `OPERATOR` fuera imposible de sacarle a nadie en particular (quedaba siempre heredado), y por lo tanto `VIEWER` nunca era una restricción real. Se sacó `OPERATOR` de ahí por ese motivo.
+- Para asignar `ADMIN`, `OPERATOR` o `VIEWER` a un usuario puntual: consola de Keycloak → `Users` → seleccionar el usuario → pestaña `Role mapping` → `Assign role`. Es un paso manual — no existe (todavía) un endpoint propio para que un admin cambie el rol de otro usuario desde nuestra API.
 - El backend (FastAPI) **nunca asigna ni modifica roles** — solo los **lee** desde el JWT (claim `realm_access.roles`) para decidir si autoriza o rechaza una request. Keycloak es la única fuente de verdad sobre quién tiene qué rol.
 
 ---
