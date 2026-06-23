@@ -95,8 +95,6 @@ services:
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
-    ports:
-      - "8080:8080"  # acceso directo (debug/local). En la VPS, considerar cerrarlo con ufw salvo desde Tailscale/localhost — el acceso normal es vía nginx en auth.soagmr.mooo.com
     depends_on:
       keycloak_db:
         condition: service_healthy

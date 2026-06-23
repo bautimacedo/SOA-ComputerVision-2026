@@ -189,6 +189,17 @@ Decisiones tomadas al preparar el primer despliegue a la VPS (rama `main`, fast-
 - **Dominio de Keycloak**: `auth.soagmr.mooo.com`, separado del dominio de la API (`soagmr.mooo.com`). Se eligió un subdominio con nginx + TLS en lugar de exponer Keycloak directo por el puerto `8080` sin cifrar — igual que se hizo para la API.
 - **Certificado**: se extiende el certificado existente de `soagmr.mooo.com` con `certbot --nginx -d soagmr.mooo.com -d auth.soagmr.mooo.com --expand` (un solo certificado cubre los dos dominios). Requiere que el registro DNS de `auth.soagmr.mooo.com` ya apunte a la IP de la VPS antes de correr el comando.
 - **`KC_HOSTNAME`**: se agregó al compose (`KEYCLOAK_HOSTNAME` en `.env`) para que Keycloak genere URLs/issuer correctos. Se mantuvo `KC_HOSTNAME_STRICT: "false"` (no estricto) por seguridad ante posibles desajustes, y se agregó `KC_PROXY_HEADERS: xforwarded` para que confíe en los headers `X-Forwarded-*` que manda nginx (necesario para que detecte que el tráfico real es HTTPS, aunque nginx le hable por HTTP puro dentro de la red interna).
-- **Puerto 8080 directo**: se mantiene publicado (no se cerró), para debug o acceso directo si hace falta. Recomendado, no aplicado todavía: restringirlo con `ufw` en la VPS para que solo responda desde `localhost`/Tailscale, ya que el acceso normal de ahora en más es vía `https://auth.soagmr.mooo.com`.
-- **Base de datos de la app** (`persons`, `frames`, etc.): se decidió recrear desde cero en la VPS — no hay datos previos que preservar ni migración manual que correr.
+- **Base de datos de la app** (`persons`, `frames`, etc.): se decidió recrear desde cero en la VPS — no hay datos previos que preservar ni migración manual que correr (aunque en la práctica la tabla `persons` ya existía de antes sin la columna `keycloak_id`, y hubo que corres la migración manual igual — ver `db/migrations/0001_add_keycloak_id_to_persons.sql`).
 - **Keycloak en la VPS**: al ser un servicio nuevo en `main` (no existía antes de este despliegue), el realm/client/roles se configuran desde cero ahí, igual que se hizo en local — no hay nada que migrar.
+
+---
+
+## 10. Hardening post-despliegue — puertos publicados al host
+
+Después del primer despliegue se revisó qué puertos quedaban publicados directo al host de la VPS (`ports:` en `docker-compose.yml`), más allá de lo que expone `nginx` (80/443):
+
+- **`keycloak` (8080)**: se había dejado publicado "por si hacía falta acceso directo de debug". Al revisarlo, se confirmó que **no tiene ningún uso real** — el navegador llega a Keycloak vía `https://auth.soagmr.mooo.com` (nginx), y nuestro backend le habla por la red interna de Docker (`http://keycloak:8080`, sin pasar por el puerto publicado). Se **quitó el `ports:` por completo** — ya no es alcanzable ni siquiera por Tailscale, solo por dentro de la red Docker o vía el subdominio.
+- **`influxdb` (8086)**: a diferencia de Keycloak, este sí tiene un uso real — el Telegraf de la PC local (fuera de la red Docker de la VPS) necesita escribirle por Tailscale. Se mantiene publicado, pero restringido en `ufw` a la interfaz `tailscale0` (no accesible desde la internet pública).
+- **Limpieza adicional en `ufw`**: se encontraron reglas abiertas a "Anywhere" para puertos `1880`, `8888` y `1883` que no correspondían a ningún servicio de este `docker-compose.yml` (se verificó con `ss -tlnp` que no había nada escuchando) — se eliminaron.
+
+Estado final de exposición pública de la VPS: solo `22` (SSH), `80` y `443` (nginx) abiertos a todo internet. `8086` (InfluxDB) accesible únicamente vía Tailscale. Keycloak no tiene ningún puerto publicado al host.
