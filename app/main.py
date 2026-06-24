@@ -82,6 +82,7 @@ app = FastAPI(
     version="1.0.0",
     openapi_tags=tags_metadata,
     contact={"name": "Repositorio", "url": "https://github.com/bautimacedo/SOA-ComputerVision-2026"},
+    root_path="/api",
 )
 
 app.add_middleware(MetricsMiddleware)
