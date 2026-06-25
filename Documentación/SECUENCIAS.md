@@ -533,6 +533,101 @@ sequenceDiagram
 
 ---
 
+## Extensión de `require_role` — chequeo de rol (S2, S5.1, S5.3, S5.4)
+
+Extiende el diagrama anterior: después de que `get_current_user` valida el JWT, los endpoints que cargan datos (`POST /detections`, `POST /persons`, `POST /persons/{id}/embeddings`, `POST /face-recognition`) tienen además `dependencies=[Depends(require_role("OPERATOR", "ADMIN"))]`.
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant N as nginx
+    participant F as FastAPI
+    participant KC as Keycloak
+
+    C->>N: POST /detections (o /persons, etc.)<br/>Authorization: Bearer jwt_access<br/>HTTPS :443
+    N->>F: Request<br/>HTTP :8000
+
+    Note over F: Paso 1: get_current_user<br/>(firma + exp + iss + azp — ver diagrama anterior)
+
+    alt Token inválido o expirado
+        F-->>N: 401
+        N-->>C: 401
+    else Token válido
+        Note over F: Paso 2: require_role("OPERATOR", "ADMIN")<br/>Lee claims["realm_access"]["roles"]<br/>ej: ["VIEWER", "default-roles-soa-realm"]
+
+        alt Ningún rol permitido está en la lista<br/>(caso VIEWER)
+            F-->>N: 403 No tenés permisos para esta acción
+            N-->>C: 403
+        else OPERATOR o ADMIN presente en la lista
+            Note over F: current_user disponible<br/>Continúa con la lógica del endpoint<br/>(S2, S5.1, S5.3 o S5.4)
+            F-->>N: Respuesta normal (201, 200, etc.)
+            N-->>C: Respuesta normal
+        end
+    end
+```
+
+**Nota clave**: este chequeo es 100% local — no hay ninguna llamada a Keycloak en este paso. `require_role` solo lee el claim `realm_access.roles` que ya viene dentro del JWT (verificado en el paso anterior); Keycloak es la fuente de verdad de *qué* rol tiene cada usuario, pero esa información ya viajó dentro del token, no hace falta volver a preguntarle nada.
+
+---
+
+## Login en Grafana vía Keycloak — Authorization Code Flow
+
+A diferencia de todos los flujos anteriores (Direct Access Grant, donde el backend reenvía la contraseña), acá Grafana usa el flujo estándar con redirect — el usuario nunca le da su contraseña a Grafana, se la da directamente a Keycloak.
+
+```mermaid
+sequenceDiagram
+    participant U as Navegador del usuario
+    participant G as Grafana
+    participant KC as Keycloak
+
+    U->>G: Click en "Sign in with Keycloak"
+    G-->>U: 302 Redirect a Keycloak<br/>GET /realms/soa-realm/protocol/openid-connect/auth<br/>?response_type=code&client_id=grafana-client<br/>&redirect_uri=.../grafana/login/generic_oauth<br/>&scope=openid email profile&state=xyz123
+
+    U->>KC: GET (sigue el redirect)<br/>HTTPS auth.soagmr.mooo.com
+
+    Note over U,KC: Pantalla de login — es la de Keycloak,<br/>no la de Grafana. El usuario escribe<br/>su usuario/contraseña directo en Keycloak.
+
+    U->>KC: POST credenciales del formulario de Keycloak
+
+    alt Credenciales inválidas
+        KC-->>U: Vuelve a mostrar el form de login con error
+    else Credenciales válidas
+        KC-->>U: 302 Redirect a Grafana<br/>GET /grafana/login/generic_oauth<br/>?code=ABC456&state=xyz123
+
+        Note over KC: El code es de un solo uso<br/>y expira en ~60 segundos —<br/>por sí solo no sirve para nada
+
+        U->>G: GET (sigue el redirect, entrega el code)
+
+        Note over G,KC: Intercambio server-to-server —<br/>el navegador NO participa de acá en adelante
+
+        G->>KC: POST /realms/soa-realm/protocol/openid-connect/token<br/>(red interna: http://keycloak:8080)<br/>grant_type=authorization_code<br/>code=ABC456&client_id=grafana-client<br/>&client_secret=...&redirect_uri=...
+
+        alt Code inválido, vencido o ya usado
+            KC-->>G: 400 invalid_grant
+            G-->>U: Error de login
+        else OK
+            KC-->>G: 200<br/>{"access_token":"...","id_token":"...","refresh_token":"..."}
+
+            G->>KC: GET /realms/soa-realm/protocol/openid-connect/userinfo<br/>Authorization: Bearer access_token
+            KC-->>G: 200<br/>{"sub":"...","email":"...","realm_access":{"roles":["ADMIN"]}}
+
+            Note over G: Evalúa role_attribute_path:<br/>contains(realm_access.roles, 'ADMIN') && 'Admin' || ''
+
+            alt 'ADMIN' NO está en realm_access.roles<br/>(caso OPERATOR o VIEWER)
+                Note over G: role_attribute_strict=true →<br/>rol resultante es '' (inválido)
+                G-->>U: Login rechazado<br/>(no entra a Grafana)
+            else 'ADMIN' está en realm_access.roles
+                Note over G: Crea sesión propia de Grafana<br/>(cookie), rol interno = Admin
+                G-->>U: 200 — Dashboard de Grafana
+            end
+        end
+    end
+```
+
+**Diferencia clave a remarcar**: notá que en este flujo, a diferencia de Auth.2 (`/auth/login`), la contraseña **nunca** pasa por el backend de la aplicación que la pidió (Grafana) — va directo del navegador a Keycloak. Es exactamente la razón por la que `grafana-client` tiene `Direct access grants: Off` y `Standard flow: On` (sección 5 de la exposición), al revés que `soa-client`.
+
+---
+
 ## Monitoreo — Métricas de la PC local (Telegraf en Docker)
 
 Telegraf de la PC local (`bruno_telegraf`, container aparte en `inference_service/docker-compose.yml`) — independiente del Telegraf de la VM, pero escribe al mismo InfluxDB, distinguido por el tag `host=bruno-pc`.

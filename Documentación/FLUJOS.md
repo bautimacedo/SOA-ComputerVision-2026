@@ -347,6 +347,59 @@ flowchart TD
 
 ---
 
+## Extensión de `require_role` — chequeo de rol (S2, S5.1, S5.3, S5.4)
+
+```mermaid
+flowchart TD
+    A([Cliente]) --> B[Request a POST /detections, /persons,\n/persons/id/embeddings o /face-recognition\nAuthorization: Bearer access_token]
+
+    B --> C[get_current_user\nfirma + exp + iss + azp]
+    C -- Inválido --> E1[401]
+
+    C -- Válido --> D[require_role lee\nclaims.realm_access.roles\nej: VIEWER, default-roles-soa-realm]
+
+    D --> F{¿OPERATOR o ADMIN\nestá en la lista?}
+    F -- No / solo VIEWER --> E2[403\nNo tenés permisos para esta acción]
+    F -- Sí --> G[Continúa con la lógica\nespecífica del endpoint]
+```
+
+Chequeo 100% local — `require_role` solo lee el claim `realm_access.roles` que ya viene dentro del JWT verificado en el paso anterior, no hay ninguna llamada de red a Keycloak en este paso.
+
+---
+
+## Login en Grafana vía Keycloak — Authorization Code Flow
+
+```mermaid
+flowchart TD
+    A([Usuario]) --> B[Click 'Sign in with Keycloak'\nen Grafana]
+    B --> C[Grafana redirige el navegador\nGET /realms/soa-realm/.../auth\nresponse_type=code]
+
+    C --> D[Pantalla de login —\nes la de Keycloak, no la de Grafana]
+    D --> E[Usuario ingresa credenciales\ndirecto en Keycloak]
+
+    E -- Credenciales inválidas --> D
+    E -- OK --> F[Keycloak redirige de vuelta a Grafana\ncon un code de un solo uso\nGET /grafana/login/generic_oauth?code=...]
+
+    F --> G[Navegador entrega el code a Grafana]
+
+    G --> H[Grafana backend → Keycloak\nserver-to-server, SIN el navegador\nPOST /token grant_type=authorization_code\n+ client_secret]
+
+    H -- Code inválido/vencido --> I1[Login rechazado]
+    H -- OK --> I[Keycloak responde\naccess_token + id_token + refresh_token]
+
+    I --> J[Grafana → Keycloak\nGET /userinfo con el access_token]
+    J --> K[Recibe claims:\nrealm_access.roles]
+
+    K --> L{¿'ADMIN' está en\nrealm_access.roles?}
+    L -- No --> M[role_attribute_strict=true →\nrol inválido → Login rechazado]
+    L -- Sí --> N[Grafana crea su propia sesión\nrol interno = Admin]
+    N --> O[Dashboard de Grafana]
+```
+
+**Diferencia clave**: la contraseña nunca pasa por Grafana — va directo del navegador a Keycloak en el paso "Usuario ingresa credenciales". Por eso `grafana-client` tiene `Direct access grants: Off` y `Standard flow: On`, al revés que `soa-client`.
+
+---
+
 ## Monitoreo — Métricas de la PC local (Telegraf en Docker)
 
 Corre como un container aparte (`inference_service/docker-compose.yml`), independiente del Telegraf de la VM. Manda CPU y memoria de la PC al mismo InfluxDB que usa la VM, etiquetadas con `host=bruno-pc`.
